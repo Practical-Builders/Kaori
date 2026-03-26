@@ -1,26 +1,174 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
+/* ── Theme tokens ────────────────────────────────────────────────────────────
+   All pages reference these variables so light/dark is global and consistent.
+   ─────────────────────────────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --page-bg:     #F4FBF8;
+  --card-bg:     #FFFFFF;
+  --card-border: rgba(5,150,105,0.13);
+  --nav-bg:      rgba(244,251,248,0.88);
+  --nav-border:  rgba(5,150,105,0.10);
+  --text-1:      #0D1F17;
+  --text-2:      #5A7268;
+  --text-3:      #8AB5A3;
+  --input-bg:    rgba(5,150,105,0.04);
+  --input-bdr:   rgba(5,150,105,0.18);
+  --divider:     rgba(5,150,105,0.12);
+  --aurora-1:    rgba(52,211,153,0.16);
+  --aurora-2:    rgba(6,182,212,0.11);
+  --aurora-3:    rgba(16,185,129,0.08);
+  --shadow-card: 0 2px 24px rgba(5,150,105,0.06), 0 1px 6px rgba(0,0,0,0.03);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html[data-theme="dark"] {
+  --page-bg:     #0A0F0D;
+  --card-bg:     rgba(20,26,23,0.95);
+  --card-border: rgba(255,255,255,0.07);
+  --nav-bg:      rgba(10,15,13,0.88);
+  --nav-border:  rgba(255,255,255,0.06);
+  --text-1:      #F0FDF4;
+  --text-2:      rgba(240,253,244,0.45);
+  --text-3:      rgba(240,253,244,0.25);
+  --input-bg:    rgba(255,255,255,0.05);
+  --input-bdr:   rgba(255,255,255,0.10);
+  --divider:     rgba(255,255,255,0.08);
+  --aurora-1:    rgba(52,211,153,0.11);
+  --aurora-2:    rgba(6,182,212,0.08);
+  --aurora-3:    rgba(16,185,129,0.06);
+  --shadow-card: 0 4px 40px rgba(0,0,0,0.35);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* ── Base ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), 'DM Sans', system-ui, sans-serif;
+  background: var(--page-bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  transition: background 0.25s, color 0.25s;
 }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 10px; }
+
+/* ── Aurora background blobs (reusable) ─────────────────────────────────── */
+.aurora-bg {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+}
+.aurora-bg::before {
+  content: "";
+  position: absolute; top: -15%; right: -8%;
+  width: 520px; height: 520px; border-radius: 50%;
+  background: radial-gradient(circle, var(--aurora-1) 0%, transparent 70%);
+  filter: blur(50px);
+}
+.aurora-bg::after {
+  content: "";
+  position: absolute; bottom: -12%; left: -6%;
+  width: 440px; height: 440px; border-radius: 50%;
+  background: radial-gradient(circle, var(--aurora-2) 0%, transparent 70%);
+  filter: blur(55px);
+}
+
+/* ── Shared nav ──────────────────────────────────────────────────────────── */
+.site-nav {
+  background: var(--nav-bg);
+  border-bottom: 1px solid var(--nav-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  position: sticky; top: 0; z-index: 40;
+  box-shadow: 0 1px 16px rgba(0,0,0,0.04);
+  transition: background 0.25s, border-color 0.25s;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.site-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  box-shadow: var(--shadow-card);
+  transition: background 0.25s, border-color 0.25s;
+}
+
+/* ── Typography helpers ──────────────────────────────────────────────────── */
+.font-display, .num {
+  font-family: var(--font-display), 'Barlow Condensed', system-ui, sans-serif;
+}
+.num { font-weight: 800; line-height: 1; }
+.text-1 { color: var(--text-1); }
+.text-2 { color: var(--text-2); }
+.text-3 { color: var(--text-3); }
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #059669, #0D9488);
+  color: #fff; font-weight: 700; border-radius: 10px; border: none;
+  cursor: pointer; box-shadow: 0 4px 20px rgba(5,150,105,0.3);
+  transition: all 0.2s; text-decoration: none;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 28px rgba(5,150,105,0.4); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.btn-ghost {
+  background: var(--input-bg); color: var(--text-2);
+  border: 1px solid var(--card-border); border-radius: 10px;
+  cursor: pointer; font-weight: 600; transition: all 0.2s;
+  font-family: var(--font-body);
+}
+.btn-ghost:hover { border-color: rgba(5,150,105,0.3); color: var(--text-1); }
+
+/* ── Form inputs ─────────────────────────────────────────────────────────── */
+.site-input {
+  width: 100%; padding: 13px 16px; border-radius: 10px; font-size: 15px;
+  border: 1px solid var(--input-bdr); background: var(--input-bg);
+  color: var(--text-1); outline: none; box-sizing: border-box;
+  font-family: var(--font-body); transition: border-color 0.15s, background 0.15s;
+}
+.site-input:focus { border-color: #059669; }
+.site-input::placeholder { color: var(--text-3); }
+
+/* ── Risk badge colors ───────────────────────────────────────────────────── */
+.badge { display: inline-flex; align-items: center; font-size: 10px; font-weight: 800;
+  letter-spacing: 0.06em; border-radius: 20px; padding: 4px 10px; text-transform: uppercase; }
+.badge-low      { background: rgba(0,200,83,0.1);   color: #007B33; border: 1px solid rgba(0,200,83,0.25); }
+.badge-moderate { background: rgba(245,158,11,0.1); color: #92400E; border: 1px solid rgba(245,158,11,0.25); }
+.badge-high     { background: rgba(239,68,68,0.1);  color: #991B1B; border: 1px solid rgba(239,68,68,0.25); }
+
+/* ── Range sliders ───────────────────────────────────────────────────────── */
+input[type="range"] {
+  -webkit-appearance: none; width: 100%; height: 4px;
+  background: var(--divider); border-radius: 2px; outline: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px;
+  border-radius: 50%; background: #059669; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(5,150,105,0.4);
+}
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.animate-up    { animation: fadeUp  0.4s ease forwards; }
+.animate-scale { animation: scaleIn 0.3s ease forwards; }
+
+.stagger > * { opacity: 0; animation: fadeUp 0.4s ease forwards; }
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.20s; }
