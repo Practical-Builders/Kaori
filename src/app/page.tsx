@@ -65,8 +65,9 @@ export default function Landing() {
         {/* Background image */}
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           <img
-            src="https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=1800&q=80"
+            src="https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&w=1800&q=80"
             alt="Female soccer athlete"
+            crossOrigin="anonymous"
             style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 30%" }}
           />
           {/* Dark gradient overlay — stronger on left */}
@@ -167,19 +168,19 @@ export default function Landing() {
                 step: "01",
                 title: "Upload Your Video",
                 desc: "Upload any training or match footage. Trim it to the clip you want analyzed. Supports MP4, MOV, and WebM.",
-                image: "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=600&q=80",
+                image: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=600&q=80",
               },
               {
                 step: "02",
                 title: "AI Pose Analysis",
                 desc: "MediaPipe tracks 33 body landmarks per frame. The engine computes joint angles, speed, stride cadence, and torque.",
-                image: "https://images.unsplash.com/photo-1551698618-1dfe5d97d256?auto=format&fit=crop&w=600&q=80",
+                image: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=600&q=80",
               },
               {
                 step: "03",
                 title: "Review Your Data",
                 desc: "Receive a factual biomechanical report covering peak speed, movement symmetry, injury risk flags, and training recommendations.",
-                image: "https://images.unsplash.com/photo-1560272564-c83b66b1ad12?auto=format&fit=crop&w=600&q=80",
+                image: "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=600&q=80",
               },
             ].map((item) => (
               <div key={item.step} style={{ background: "#141A17", overflow: "hidden" }}>
@@ -187,6 +188,7 @@ export default function Landing() {
                   <img
                     src={item.image}
                     alt={item.title}
+                    crossOrigin="anonymous"
                     style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                   />
                 </div>

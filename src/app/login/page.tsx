@@ -148,11 +148,13 @@ export default function LoginPage() {
 
   return (
     <>
-      <Script
-        src="https://accounts.google.com/gsi/client"
-        strategy="afterInteractive"
-        onLoad={() => setGsiReady(true)}
-      />
+      {GOOGLE_CLIENT_ID && (
+        <Script
+          src="https://accounts.google.com/gsi/client"
+          strategy="afterInteractive"
+          onLoad={() => setGsiReady(true)}
+        />
+      )}
       <main style={{
         minHeight: "100vh",
         background: "#0A0F0D",
@@ -164,8 +166,9 @@ export default function LoginPage() {
         {/* ── Left: athlete image panel ── */}
         <div style={{ position: "relative", overflow: "hidden" }}>
           <img
-            src="https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=900&q=80"
+            src="https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=900&q=80"
             alt="Female soccer athlete"
+            crossOrigin="anonymous"
             style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 20%" }}
           />
           {/* Dark overlay */}
@@ -237,28 +240,30 @@ export default function LoginPage() {
                 : "Start tracking your biomechanics for free."}
             </p>
 
-            {/* Google Sign-In */}
-            <div style={{ marginBottom: 20 }}>
-              {gsiReady ? (
-                <div ref={googleBtnRef} style={{ width: "100%" }} />
-              ) : (
-                <div style={{
-                  width: "100%", padding: "13px", borderRadius: 10,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "rgba(255,255,255,0.3)", fontSize: 14, textAlign: "center",
-                }}>
-                  Loading Google Sign-In…
+            {/* Google Sign-In — only shown when client ID is configured */}
+            {GOOGLE_CLIENT_ID && (
+              <>
+                <div style={{ marginBottom: 20 }}>
+                  {gsiReady ? (
+                    <div ref={googleBtnRef} style={{ width: "100%" }} />
+                  ) : (
+                    <div style={{
+                      width: "100%", padding: "13px", borderRadius: 10,
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "rgba(255,255,255,0.3)", fontSize: 14, textAlign: "center",
+                    }}>
+                      Loading Google Sign-In…
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-
-            {/* Divider */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", fontWeight: 500 }}>or</span>
-              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
-            </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                  <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", fontWeight: 500 }}>or</span>
+                  <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+                </div>
+              </>
+            )}
 
             {/* Form */}
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
