@@ -174,7 +174,7 @@ export default function Landing() {
                 step: "02",
                 title: "AI Pose Analysis",
                 desc: "MediaPipe tracks 33 body landmarks per frame. The engine computes joint angles, speed, stride cadence, and torque.",
-                image: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=600&q=80",
+                image: "/pose-analysis.jpg",
               },
               {
                 step: "03",
