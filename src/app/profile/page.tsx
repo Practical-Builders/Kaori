@@ -4,6 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProfile, AthleteProfile, AnalysisSession } from "@/contexts/ProfileContext";
+import {
+  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
+} from "recharts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const AUTHED_KEY  = "kickiq_authed_email";
@@ -34,9 +38,248 @@ const EXPLORE = [
   { cat: "Training", title: "Ball Mastery: 15-Min Daily Routine", source: "Coerver", url: "https://www.coerver.com/", img: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=400&q=80" },
 ];
 
+// ── Progress Charts Tab ────────────────────────────────────────────────────────
+function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark: boolean }) {
+  const text1 = isDark ? "white" : "#0D1F17";
+  const text2 = isDark ? "rgba(255,255,255,0.4)" : "#5A7268";
+  const card  = isDark ? "#141A17" : "white";
+  const border = isDark ? "rgba(255,255,255,0.08)" : "rgba(5,150,105,0.12)";
+  const gridColor = isDark ? "rgba(255,255,255,0.05)" : "rgba(5,150,105,0.08)";
+  const axisColor = isDark ? "rgba(255,255,255,0.25)" : "#8AB5A3";
+
+  const sorted = [...sessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const speedData = sorted
+    .filter(s => s.peakSpeedMs)
+    .map((s, i) => ({
+      session: i + 1,
+      label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      speed: parseFloat(s.peakSpeedMs!.toFixed(2)),
+      mean: s.meanSpeedMs ? parseFloat(s.meanSpeedMs.toFixed(2)) : undefined,
+    }));
+
+  const symmetryData = sorted
+    .filter(s => s.symmetryScore)
+    .map((s, i) => ({
+      session: i + 1,
+      label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      symmetry: parseFloat(s.symmetryScore!.toFixed(1)),
+    }));
+
+  const riskData = sorted
+    .filter(s => s.overallRiskScore !== undefined)
+    .map((s, i) => ({
+      session: i + 1,
+      label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      risk: s.overallRiskScore,
+      fill: s.overallRisk === "low" ? "#10B981" : s.overallRisk === "moderate" ? "#FBBF24" : "#F87171",
+    }));
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    return (
+      <div style={{ background: isDark ? "#1A2420" : "white", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 12 }}>
+        <p style={{ color: text2, marginBottom: 4, fontWeight: 700 }}>{label}</p>
+        {payload.map((p: any, i: number) => (
+          <p key={i} style={{ color: p.color || "#10B981", fontWeight: 800 }}>{p.name}: {p.value}</p>
+        ))}
+      </div>
+    );
+  };
+
+  const avgSpeed = speedData.length ? (speedData.reduce((a, d) => a + d.speed, 0) / speedData.length).toFixed(2) : "—";
+  const bestSpeed = speedData.length ? Math.max(...speedData.map(d => d.speed)).toFixed(2) : "—";
+  const avgSym = symmetryData.length ? (symmetryData.reduce((a, d) => a + d.symmetry, 0) / symmetryData.length).toFixed(1) : "—";
+  const latestRisk = riskData.length ? riskData[riskData.length - 1] : null;
+
+  if (sessions.length === 0) {
+    return (
+      <div style={{ padding: "80px 24px", textAlign: "center", background: card, border: `1px solid ${border}`, borderRadius: 18 }}>
+        <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 28, color: text1, marginBottom: 10 }}>No data yet</p>
+        <p style={{ color: text2, fontSize: 15 }}>Upload sessions to see your progress charts.</p>
+        <Link href="/analyze" style={{ display: "inline-block", marginTop: 24, padding: "14px 32px", borderRadius: 14, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 15, textDecoration: "none" }}>Analyze First Video →</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Summary stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+        {[
+          { label: "Best Speed", value: `${bestSpeed} m/s`, sub: "peak recorded", color: "#10B981" },
+          { label: "Avg Speed", value: `${avgSpeed} m/s`, sub: "across sessions", color: "#34D399" },
+          { label: "Avg Symmetry", value: `${avgSym}%`, sub: "balance score", color: "#06B6D4" },
+          { label: "Sessions", value: String(sessions.length), sub: "total analyzed", color: "#A78BFA" },
+          ...(latestRisk ? [{ label: "Latest Risk", value: latestRisk.fill === "#10B981" ? "Low" : latestRisk.fill === "#FBBF24" ? "Moderate" : "High", sub: "injury risk", color: latestRisk.fill as string }] : []),
+        ].map(d => (
+          <div key={d.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "18px 16px" }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{d.label}</p>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26, color: d.color, lineHeight: 1 }}>{d.value}</p>
+            <p style={{ fontSize: 11, color: text2, marginTop: 6 }}>{d.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Speed trend */}
+      {speedData.length >= 2 && (
+        <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 18, padding: "24px 24px 16px" }}>
+          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, marginBottom: 4 }}>Speed Over Time</p>
+          <p style={{ fontSize: 12, color: text2, marginBottom: 20 }}>Peak and mean sprint speed across sessions (m/s)</p>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={speedData} margin={{ top: 4, right: 16, left: -16, bottom: 0 }}>
+              <CartesianGrid stroke={gridColor} strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} />
+              <Line type="monotone" dataKey="speed" name="Peak Speed" stroke="#10B981" strokeWidth={2.5} dot={{ fill: "#10B981", r: 4 }} activeDot={{ r: 6 }} />
+              {speedData.some(d => d.mean) && (
+                <Line type="monotone" dataKey="mean" name="Mean Speed" stroke="#34D399" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Symmetry trend */}
+      {symmetryData.length >= 2 && (
+        <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 18, padding: "24px 24px 16px" }}>
+          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, marginBottom: 4 }}>Body Symmetry</p>
+          <p style={{ fontSize: 12, color: text2, marginBottom: 20 }}>Left/right balance score — higher is better (%)</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={symmetryData} margin={{ top: 4, right: 16, left: -16, bottom: 0 }}>
+              <defs>
+                <linearGradient id="symGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#06B6D4" stopOpacity={0.25} />
+                  <stop offset="95%" stopColor="#06B6D4" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={gridColor} strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis domain={[50, 100]} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} />
+              <ReferenceLine y={80} stroke="#10B981" strokeDasharray="4 4" strokeOpacity={0.4} />
+              <Area type="monotone" dataKey="symmetry" name="Symmetry" stroke="#06B6D4" fill="url(#symGrad)" strokeWidth={2.5} dot={{ fill: "#06B6D4", r: 4 }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Risk trend */}
+      {riskData.length >= 2 && (
+        <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 18, padding: "24px 24px 16px" }}>
+          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, marginBottom: 4 }}>Injury Risk Score</p>
+          <p style={{ fontSize: 12, color: text2, marginBottom: 20 }}>AI-assessed risk per session — lower is better</p>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={riskData} margin={{ top: 4, right: 16, left: -16, bottom: 0 }}>
+              <CartesianGrid stroke={gridColor} strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, 100]} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} />
+              {riskData.map((d, i) => null)}
+              <Bar dataKey="risk" name="Risk Score" radius={[6, 6, 0, 0]}>
+                {riskData.map((d, i) => (
+                  <rect key={i} fill={d.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{ display: "flex", gap: 16, marginTop: 12, justifyContent: "center" }}>
+            {[["#10B981", "Low"], ["#FBBF24", "Moderate"], ["#F87171", "High"]].map(([c, l]) => (
+              <div key={l} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 3, background: c }} />
+                <span style={{ fontSize: 11, color: text2, fontWeight: 600 }}>{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {sessions.length === 1 && (
+        <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "20px 24px", textAlign: "center" }}>
+          <p style={{ color: text2, fontSize: 14 }}>Add more sessions to see your progress charts and trends.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Compare Modal ──────────────────────────────────────────────────────────────
+function CompareModal({ sessions, compareIds, onClose }: {
+  sessions: AnalysisSession[]; compareIds: string[]; onClose: () => void;
+}) {
+  const a = sessions.find(s => s.id === compareIds[0]);
+  const b = sessions.find(s => s.id === compareIds[1]);
+  if (!a || !b) return null;
+
+  const rows = [
+    { label: "Date",           vA: new Date(a.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}), vB: new Date(b.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}), better: null },
+    { label: "Peak Speed",     vA: a.peakSpeedMs ? `${a.peakSpeedMs.toFixed(2)} m/s` : "—", vB: b.peakSpeedMs ? `${b.peakSpeedMs.toFixed(2)} m/s` : "—", better: (a.peakSpeedMs ?? 0) > (b.peakSpeedMs ?? 0) ? "A" : (b.peakSpeedMs ?? 0) > (a.peakSpeedMs ?? 0) ? "B" : null },
+    { label: "Mean Speed",     vA: a.meanSpeedMs ? `${a.meanSpeedMs.toFixed(2)} m/s` : "—", vB: b.meanSpeedMs ? `${b.meanSpeedMs.toFixed(2)} m/s` : "—", better: (a.meanSpeedMs ?? 0) > (b.meanSpeedMs ?? 0) ? "A" : (b.meanSpeedMs ?? 0) > (a.meanSpeedMs ?? 0) ? "B" : null },
+    { label: "Stride Count",   vA: a.strideCount ? String(a.strideCount) : "—", vB: b.strideCount ? String(b.strideCount) : "—", better: null },
+    { label: "Symmetry Score", vA: a.symmetryScore ? `${a.symmetryScore.toFixed(1)}%` : "—", vB: b.symmetryScore ? `${b.symmetryScore.toFixed(1)}%` : "—", better: (a.symmetryScore ?? 0) > (b.symmetryScore ?? 0) ? "A" : (b.symmetryScore ?? 0) > (a.symmetryScore ?? 0) ? "B" : null },
+    { label: "Peak Torque",    vA: a.peakTorqueNm ? `${a.peakTorqueNm.toFixed(0)} Nm` : "—", vB: b.peakTorqueNm ? `${b.peakTorqueNm.toFixed(0)} Nm` : "—", better: (a.peakTorqueNm ?? 0) > (b.peakTorqueNm ?? 0) ? "A" : (b.peakTorqueNm ?? 0) > (a.peakTorqueNm ?? 0) ? "B" : null },
+    { label: "Injury Risk",    vA: a.overallRisk ? a.overallRisk.charAt(0).toUpperCase() + a.overallRisk.slice(1) : "—", vB: b.overallRisk ? b.overallRisk.charAt(0).toUpperCase() + b.overallRisk.slice(1) : "—", better: a.overallRisk === "low" && b.overallRisk !== "low" ? "A" : b.overallRisk === "low" && a.overallRisk !== "low" ? "B" : null },
+    { label: "Duration",       vA: `${a.videoDuration.toFixed(0)}s`, vB: `${b.videoDuration.toFixed(0)}s`, better: null },
+  ];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }} onClick={onClose} />
+      <div style={{ position: "relative", width: "100%", maxWidth: 720, maxHeight: "90vh", overflow: "auto", background: "#111816", borderRadius: 24, boxShadow: "0 40px 100px rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ padding: "22px 28px", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "white" }}>Session Comparison</p>
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,0.07)", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 15 }}>✕</button>
+        </div>
+
+        {/* Column headers */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+          <div style={{ padding: "14px 20px" }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Metric</p>
+          </div>
+          {[a, b].map((s, i) => (
+            <div key={s.id} style={{ padding: "14px 20px", background: i === 0 ? "rgba(5,150,105,0.06)" : "rgba(6,182,212,0.06)", borderLeft: "1px solid rgba(255,255,255,0.05)" }}>
+              <p style={{ fontSize: 10, fontWeight: 700, color: i === 0 ? "#10B981" : "#06B6D4", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Session {i + 1}</p>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.videoName}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Rows */}
+        {rows.map((row, i) => (
+          <div key={row.label} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)" }}>
+            <div style={{ padding: "13px 20px" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{row.label}</p>
+            </div>
+            {[{ v: row.vA, win: row.better === "A" }, { v: row.vB, win: row.better === "B" }].map((cell, j) => (
+              <div key={j} style={{ padding: "13px 20px", borderLeft: "1px solid rgba(255,255,255,0.04)", display: "flex", alignItems: "center", gap: 8 }}>
+                <p style={{ fontSize: 14, fontWeight: 800, color: cell.win ? "#10B981" : "rgba(255,255,255,0.75)" }}>{cell.v}</p>
+                {cell.win && <span style={{ fontSize: 9, fontWeight: 800, background: "rgba(16,185,129,0.15)", color: "#10B981", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 100, padding: "2px 7px", letterSpacing: "0.04em" }}>BETTER</span>}
+              </div>
+            ))}
+          </div>
+        ))}
+
+        {/* AI summaries */}
+        {(a.geminiSummary || b.geminiSummary) && (
+          <div style={{ padding: "20px 28px", borderTop: "1px solid rgba(255,255,255,0.07)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {[a, b].map((s, i) => s.geminiSummary ? (
+              <div key={s.id} style={{ background: i === 0 ? "rgba(5,150,105,0.07)" : "rgba(6,182,212,0.07)", border: `1px solid ${i === 0 ? "rgba(5,150,105,0.18)" : "rgba(6,182,212,0.18)"}`, borderRadius: 12, padding: "14px 16px" }}>
+                <p style={{ fontSize: 10, fontWeight: 700, color: i === 0 ? "#10B981" : "#06B6D4", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>AI Analysis</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>{s.geminiSummary.slice(0, 220)}{s.geminiSummary.length > 220 ? "…" : ""}</p>
+              </div>
+            ) : <div key={s.id} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Session scrub card ─────────────────────────────────────────────────────────
-function SessionCard({ session, onRemove, pinned, onPin }: {
+function SessionCard({ session, onRemove, pinned, onPin, selected, onSelect }: {
   session: AnalysisSession; onRemove: () => void; pinned: boolean; onPin: () => void;
+  selected?: boolean; onSelect?: () => void;
 }) {
   const [open,   setOpen]   = useState(false);
   const [scrub,  setScrub]  = useState<number | null>(null);
@@ -54,6 +297,12 @@ function SessionCard({ session, onRemove, pinned, onPin }: {
     <div style={{ background: "#141A17", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden", transition: "all 0.2s" }}>
       {/* Card header — always visible */}
       <div onClick={() => setOpen(o => !o)} style={{ padding: "16px 18px", cursor: "pointer", display: "flex", gap: 14, alignItems: "center" }}>
+        {/* Compare checkbox */}
+        {onSelect && (
+          <div onClick={e => { e.stopPropagation(); onSelect(); }} style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${selected ? "#059669" : "rgba(255,255,255,0.15)"}`, background: selected ? "#059669" : "transparent", flexShrink: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>
+            {selected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+          </div>
+        )}
         {/* Video icon */}
         <div style={{ width: 52, height: 52, borderRadius: 12, background: "linear-gradient(135deg,#0B2A1A,#0B1F3A)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, border: "1px solid rgba(255,255,255,0.06)" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.8" strokeLinecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
@@ -232,9 +481,11 @@ function EditModal({ onClose }: { onClose: () => void }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const { profile, sessions, removeSession, profileComplete, setProfile } = useProfile();
-  const [activeTab,  setActiveTab]  = useState<"performance"|"explore"|"settings">("performance");
+  const [activeTab,  setActiveTab]  = useState<"performance"|"progress"|"explore"|"settings">("performance");
   const [editOpen,   setEditOpen]   = useState(false);
   const [pinnedIds,  setPinnedIds]  = useState<string[]>([]);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [isDark,     setIsDark]     = useState(true);
   const router = useRouter();
 
@@ -268,6 +519,12 @@ export default function ProfilePage() {
     });
   }
 
+  function toggleCompare(id: string) {
+    setCompareIds(prev =>
+      prev.includes(id) ? prev.filter(p => p !== id) : prev.length >= 2 ? [prev[1], id] : [...prev, id]
+    );
+  }
+
   // Derived stats
   const allSpeeds   = sessions.filter(s => s.peakSpeedMs).map(s => s.peakSpeedMs!);
   const bestSpeed   = allSpeeds.length ? Math.max(...allSpeeds) : null;
@@ -299,6 +556,20 @@ export default function ProfilePage() {
   return (
     <main style={{ minHeight: "100vh", background: bg, fontFamily: "var(--font-body)", transition: "background 0.3s" }}>
       {editOpen && <EditModal onClose={() => setEditOpen(false)} />}
+      {compareOpen && compareIds.length === 2 && (
+        <CompareModal sessions={sessions} compareIds={compareIds} onClose={() => setCompareOpen(false)} />
+      )}
+
+      {/* Compare floating bar */}
+      {compareIds.length > 0 && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 40, display: "flex", alignItems: "center", gap: 12, background: isDark ? "#1A2420" : "white", border: "1px solid rgba(5,150,105,0.35)", borderRadius: 100, padding: "10px 20px", boxShadow: "0 8px 32px rgba(0,0,0,0.35)" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: text2 }}>{compareIds.length === 1 ? "Select 1 more session to compare" : "2 sessions selected"}</span>
+          {compareIds.length === 2 && (
+            <button onClick={() => setCompareOpen(true)} style={{ padding: "8px 18px", borderRadius: 100, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>Compare →</button>
+          )}
+          <button onClick={() => setCompareIds([])} style={{ padding: "6px 12px", borderRadius: 100, background: "transparent", border: "none", cursor: "pointer", color: text2, fontSize: 12, fontWeight: 600 }}>Clear</button>
+        </div>
+      )}
 
       {/* ── NAV ── */}
       <nav style={{ position: "sticky", top: 0, zIndex: 40, background: isDark ? "rgba(10,15,13,0.92)" : "rgba(244,251,248,0.92)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${border}` }}>
@@ -315,6 +586,7 @@ export default function ProfilePage() {
           <div style={{ display: "flex", flex: 1, gap: 0 }}>
             {([
               { id: "performance", label: "Performance" },
+              { id: "progress",    label: "Progress"    },
               { id: "explore",     label: "Explore"     },
               { id: "settings",    label: "Profile"     },
             ] as const).map(t => (
@@ -329,6 +601,7 @@ export default function ProfilePage() {
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Link href="/discover" style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, borderRadius: 10, color: text2, textDecoration: "none", border: `1px solid ${border}` }}>Discover</Link>
             <Link href="/analyze" style={{ padding: "8px 16px", fontSize: 13, fontWeight: 700, borderRadius: 10, color: "white", textDecoration: "none", background: "linear-gradient(135deg,#059669,#0D9488)", boxShadow: "0 4px 14px rgba(5,150,105,0.3)" }}>+ Add Video</Link>
             <button onClick={toggleTheme} style={{ padding: "7px 13px", borderRadius: 20, cursor: "pointer", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.08)", border: `1px solid ${border}`, color: text2, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
               {isDark
@@ -436,15 +709,25 @@ export default function ProfilePage() {
                   <div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                       <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>All Sessions <span style={{ fontSize: 13, color: text2, fontWeight: 600 }}>({sessions.length})</span></p>
-                      <Link href="/analyze" style={{ fontSize: 13, fontWeight: 700, color: "#10B981", textDecoration: "none" }}>+ Add →</Link>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        {compareIds.length === 0 && sessions.length >= 2 && (
+                          <span style={{ fontSize: 11, color: text2, fontWeight: 600 }}>Select 2 to compare</span>
+                        )}
+                        <Link href="/analyze" style={{ fontSize: 13, fontWeight: 700, color: "#10B981", textDecoration: "none" }}>+ Add →</Link>
+                      </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {sessions.map(s => <SessionCard key={s.id} session={s} onRemove={() => removeSession(s.id)} pinned={pinnedIds.includes(s.id)} onPin={() => togglePin(s.id)} />)}
+                      {sessions.map(s => <SessionCard key={s.id} session={s} onRemove={() => removeSession(s.id)} pinned={pinnedIds.includes(s.id)} onPin={() => togglePin(s.id)} selected={compareIds.includes(s.id)} onSelect={() => toggleCompare(s.id)} />)}
                     </div>
                   </div>
                 </>
               )}
             </>
+          )}
+
+          {/* ── PROGRESS TAB ── */}
+          {activeTab === "progress" && (
+            <ProgressTab sessions={sessions} isDark={isDark} />
           )}
 
           {/* ── EXPLORE TAB ── */}
@@ -487,9 +770,14 @@ export default function ProfilePage() {
                     <p style={{ fontSize: 13, color: text2 }}>{profile.email || "No email set"}</p>
                   </div>
                 </div>
-                <button onClick={() => setEditOpen(true)} style={{ width: "100%", padding: "12px", borderRadius: 12, background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", border: "1px solid rgba(5,150,105,0.2)", color: "#10B981", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-                  Edit Profile Info →
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button onClick={() => setEditOpen(true)} style={{ width: "100%", padding: "12px", borderRadius: 12, background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", border: "1px solid rgba(5,150,105,0.2)", color: "#10B981", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                    Edit Profile Info →
+                  </button>
+                  <Link href="/athlete" style={{ display: "block", width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "center", textDecoration: "none", boxSizing: "border-box" }}>
+                    Preview Public Profile →
+                  </Link>
+                </div>
               </div>
 
               {/* Account type */}
