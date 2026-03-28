@@ -57,6 +57,7 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "";
 export default function LoginPage() {
   const router = useRouter();
   const [mode,     setMode]     = useState<"signin" | "register">("signin");
+  const [role,     setRole]     = useState<"athlete" | "recruiter" | null>(null);
   const [name,     setName]     = useState("");
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
@@ -133,6 +134,10 @@ export default function LoginPage() {
         const hash = await hashPassword(password, salt);
         saveUsers([...users, { email: email.toLowerCase(), name: name.trim(), salt, hash }]);
         sessionStorage.setItem(AUTHED_KEY, email.toLowerCase());
+        if (role) {
+          const existing = JSON.parse(localStorage.getItem("kaori_profile") ?? "{}");
+          localStorage.setItem("kaori_profile", JSON.stringify({ ...existing, accountType: role }));
+        }
         router.replace("/profile");
       } else {
         const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
@@ -229,15 +234,53 @@ export default function LoginPage() {
               fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 32,
               color: "white", letterSpacing: "-0.02em", marginBottom: 6,
             }}>
-              {mode === "signin" ? "Welcome back." : "Create account."}
+              {mode === "signin" ? "Welcome back." : role ? (role === "athlete" ? "Athlete Sign Up" : "Recruiter Sign Up") : "Join KickIQ."}
             </h1>
             <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", marginBottom: 32 }}>
               {mode === "signin"
                 ? "Sign in to access your performance data."
-                : "Start tracking your biomechanics for free."}
+                : role ? "Fill in your details to create your account." : "Who are you joining as?"}
             </p>
 
-            {/* Google Sign-In */}
+            {/* Role selection — shown only on register before role is chosen */}
+            {mode === "register" && !role && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 28 }}>
+                {([
+                  { id: "athlete", icon: "⚽", title: "Athlete", desc: "Track performance, get AI analysis, get discovered by coaches", color: "#10B981" },
+                  { id: "recruiter", icon: "🔍", title: "Recruiter / Coach", desc: "Discover and scout talented athletes with AI biomechanics data", color: "#06B6D4" },
+                ] as const).map(r => (
+                  <button key={r.id} onClick={() => setRole(r.id)} style={{
+                    display: "flex", alignItems: "flex-start", gap: 16, padding: "20px",
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.10)",
+                    borderRadius: 14, cursor: "pointer", textAlign: "left", transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.border = `1px solid ${r.color}50`)}
+                  onMouseLeave={e => (e.currentTarget.style.border = "1px solid rgba(255,255,255,0.10)")}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${r.color}18`, border: `1px solid ${r.color}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{r.icon}</div>
+                    <div>
+                      <p style={{ fontWeight: 800, fontSize: 16, color: "white", marginBottom: 4, fontFamily: "var(--font-display)" }}>{r.title}</p>
+                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", lineHeight: 1.5 }}>{r.desc}</p>
+                    </div>
+                    <div style={{ marginLeft: "auto", color: "rgba(255,255,255,0.2)", fontSize: 18, alignSelf: "center" }}>›</div>
+                  </button>
+                ))}
+                <div style={{ textAlign: "center", marginTop: 4 }}>
+                  <button onClick={() => setMode("signin")} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
+                    Already have an account? <span style={{ color: "#10B981", fontWeight: 700 }}>Sign in</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Google Sign-In + form — hidden until role is chosen on register */}
+            {(mode === "signin" || role) && (<>
+            {/* Back to role select */}
+            {mode === "register" && role && (
+              <button onClick={() => setRole(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)", fontSize: 12, marginBottom: 20, padding: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                <span>‹</span> Back
+                <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 800, background: role === "athlete" ? "rgba(16,185,129,0.15)" : "rgba(6,182,212,0.15)", color: role === "athlete" ? "#10B981" : "#06B6D4", border: `1px solid ${role === "athlete" ? "rgba(16,185,129,0.3)" : "rgba(6,182,212,0.3)"}`, borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.05em" }}>{role}</span>
+              </button>
+            )}
             <div style={{ marginBottom: 20 }}>
               {GOOGLE_CLIENT_ID ? (
                 gsiReady ? (
@@ -381,6 +424,7 @@ export default function LoginPage() {
             }}>
               Continue without account
             </Link>
+            </>)}
           </div>
         </div>
       </main>

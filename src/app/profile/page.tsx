@@ -28,10 +28,18 @@ function riskLabel(l?: string) {
   return "Attention";
 }
 
+// ── Session thumbnail pool (soccer action shots) ──────────────────────────────
+const SESSION_THUMBS = [
+  "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=900&q=80",
+];
+
 // ── Explore content ───────────────────────────────────────────────────────────
 const EXPLORE = [
-  { cat: "Training", title: "5 Speed Drills for Midfielders", source: "UEFA", url: "https://www.uefa.com/nationalassociations/uefaregulations/technicalreports/", img: "https://images.unsplash.com/photo-1551698618-1dfe5d97d256?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Fitness",  title: "Injury Prevention for Young Athletes", source: "FIFA", url: "https://www.fifa.com/technical/football-medicine/", img: "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=400&q=80" },
+  { cat: "Training", title: "5 Speed Drills for Midfielders", source: "UEFA", url: "https://www.uefa.com/nationalassociations/uefaregulations/technicalreports/", img: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=400&q=80" },
+  { cat: "Fitness",  title: "Injury Prevention for Young Athletes", source: "FIFA", url: "https://www.fifa.com/technical/football-medicine/", img: "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=400&q=80" },
   { cat: "Tactics",  title: "Pressing Triggers & High Press", source: "FC Barcelona", url: "https://www.fcbarcelona.com/en/football/first-team", img: "https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=400&q=80" },
   { cat: "Nutrition","title": "Fueling Performance: Pre-Match Diet", source: "Sports Science", url: "https://www.gssiweb.org/sports-science-exchange/article/sse-180-fueling-for-sport", img: "https://images.unsplash.com/photo-1547347298-4074fc3086f0?auto=format&fit=crop&w=400&q=80" },
   { cat: "Recruiting","title":"How College Coaches Find Prospects", source: "NSCAA", url: "https://www.nscaa.com/resources/college-recruiting", img: "https://images.unsplash.com/photo-1560272564-c83b66b1ad12?auto=format&fit=crop&w=400&q=80" },
@@ -486,6 +494,7 @@ export default function ProfilePage() {
   const [pinnedIds,  setPinnedIds]  = useState<string[]>([]);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [showAllInsights, setShowAllInsights] = useState(false);
   const [isDark,     setIsDark]     = useState(true);
   const router = useRouter();
 
@@ -633,30 +642,27 @@ export default function ProfilePage() {
           {/* ── PERFORMANCE TAB ── */}
           {activeTab === "performance" && (
             <>
-              {/* Compact identity strip */}
-              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28, padding: "20px 24px", background: card, border: `1px solid ${border}`, borderRadius: 18 }}>
-                <div style={{ width: 60, height: 60, borderRadius: 16, overflow: "hidden", flexShrink: 0, border: `2px solid ${border}` }}>
+              {/* Slim identity strip */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, padding: "12px 18px", background: card, border: `1px solid ${border}`, borderRadius: 14 }}>
+                <div style={{ width: 46, height: 46, borderRadius: 12, overflow: "hidden", flexShrink: 0, border: `2px solid ${border}` }}>
                   {profile.photoUrl
                     ? <img src={profile.photoUrl} alt={profile.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     : <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 26, color: "white" }}>{profile.name.charAt(0).toUpperCase()}</span>
+                        <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 19, color: "white" }}>{profile.name.charAt(0).toUpperCase()}</span>
                       </div>}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1 }}>{profile.name}</p>
-                    {profile.primaryPosition && <span style={{ fontSize: 11, fontWeight: 800, background: "rgba(5,150,105,0.12)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{profile.primaryPosition}</span>}
-                    {profile.openToRecruitment && <span style={{ fontSize: 10, fontWeight: 800, background: "rgba(251,191,36,0.12)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 100, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Open to Recruit</span>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{profile.name}</p>
+                    {profile.primaryPosition && <span style={{ fontSize: 10, fontWeight: 800, background: "rgba(5,150,105,0.12)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{profile.primaryPosition}</span>}
+                    {profile.openToRecruitment && <span style={{ fontSize: 9, fontWeight: 800, background: "rgba(251,191,36,0.12)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Open to Recruit</span>}
                   </div>
-                  <p style={{ fontSize: 12, color: text2, marginTop: 3 }}>
-                    {[profile.currentClub, profile.location, profile.age ? `Age ${profile.age}` : ""].filter(Boolean).join(" · ")}
-                  </p>
+                  <p style={{ fontSize: 11, color: text2, marginTop: 2 }}>{[profile.currentClub, profile.location, profile.age ? `Age ${profile.age}` : ""].filter(Boolean).join(" · ")}</p>
                 </div>
-                {/* Quick stats */}
-                <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
-                  {bestSpeed && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: "#10B981" }}>{bestSpeed.toFixed(1)}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>m/s best</p></div>}
-                  <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1 }}>{sessions.length}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Sessions</p></div>
-                  {avgSymmetry && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1 }}>{avgSymmetry.toFixed(0)}%</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Symmetry</p></div>}
+                <div style={{ display: "flex", gap: 18, flexShrink: 0, borderLeft: `1px solid ${border}`, paddingLeft: 18 }}>
+                  {bestSpeed && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "#10B981", lineHeight: 1 }}>{bestSpeed.toFixed(1)}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>m/s best</p></div>}
+                  <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{sessions.length}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Sessions</p></div>
+                  {avgSymmetry && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{avgSymmetry.toFixed(0)}%</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Symmetry</p></div>}
                 </div>
               </div>
 
@@ -669,55 +675,195 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <>
-                  {/* ── Top Moments (best per category, all sessions) ── */}
-                  {topMoments.length > 0 && (
-                    <div style={{ marginBottom: 28 }}>
-                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 14 }}>Top Moments</p>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
-                        {topMoments.slice(0, 3).map((h, i) => (
-                          <div key={i} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "16px 14px" }}>
-                            <p style={{ fontSize: 10, fontWeight: 700, color: "#10B981", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{h.label}</p>
-                            {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 24, color: text1 }}>{h.value}</p>}
-                            <p style={{ fontSize: 10, color: text2, marginTop: 4 }}>at {h.timestamp_s.toFixed(1)}s</p>
+                  {/* ── HERO VIDEO ── */}
+                  <div style={{ marginBottom: 24 }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Hero Videos</p>
+                    <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", height: 360, background: "#071A10", cursor: "pointer" }}>
+                      <img src={sessions[0].thumbnail || SESSION_THUMBS[0]} alt="" crossOrigin={sessions[0].thumbnail ? undefined : "anonymous"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.6 }} />
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(160deg, rgba(3,12,7,0.7) 0%, rgba(3,12,7,0.25) 50%, rgba(3,12,7,0.88) 100%)" }} />
+                      {/* Session label — top left */}
+                      <div style={{ position: "absolute", top: 16, left: 16, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(12px)", borderRadius: 10, padding: "7px 13px", border: "1px solid rgba(255,255,255,0.09)" }}>
+                        <p style={{ fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Session {new Date(sessions[0].date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</p>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: "white", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sessions[0].videoName}</p>
+                      </div>
+                      {/* HUD chips — top right */}
+                      <div style={{ position: "absolute", top: 16, right: 16, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                        {sessions[0].peakSpeedMs && (
+                          <div style={{ background: "rgba(5,150,105,0.88)", backdropFilter: "blur(8px)", borderRadius: 8, padding: "6px 11px", display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ fontSize: 13 }}>⚡</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: "white", fontFamily: "var(--font-display)" }}>{sessions[0].peakSpeedMs.toFixed(2)} m/s</span>
                           </div>
+                        )}
+                        {sessions[0].symmetryScore && (
+                          <div style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", borderRadius: 8, padding: "6px 11px", border: "1px solid rgba(6,182,212,0.4)", display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ fontSize: 11 }}>⚖️</span>
+                            <span style={{ fontSize: 12, fontWeight: 800, color: "#06B6D4" }}>{sessions[0].symmetryScore.toFixed(0)}% sym</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Play button */}
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "rgba(5,150,105,0.88)", border: "3px solid rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 40px rgba(5,150,105,0.5), 0 0 80px rgba(5,150,105,0.2)" }}>
+                          <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </div>
+                      </div>
+                      {/* Bottom HUD bar */}
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)", padding: "50px 20px 18px" }}>
+                        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+                          <div style={{ display: "flex", gap: 24 }}>
+                            {sessions[0].highlights?.slice(0, 2).map((h, i) => (
+                              <div key={i}>
+                                <p style={{ fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{h.label}</p>
+                                <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "white", lineHeight: 1 }}>{h.value}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            {sessions[0].overallRisk && <span style={{ fontSize: 11, fontWeight: 800, color: riskColor(sessions[0].overallRisk), background: `${riskColor(sessions[0].overallRisk)}22`, border: `1px solid ${riskColor(sessions[0].overallRisk)}44`, borderRadius: 100, padding: "3px 10px" }}>{riskLabel(sessions[0].overallRisk)} Risk</span>}
+                            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>{sessions[0].videoDuration.toFixed(0)}s</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Below-hero metric strip */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                      {[
+                        { icon: "🚀", label: "Max Sprint Acceleration", value: sessions[0].peakSpeedMs ? `${sessions[0].peakSpeedMs.toFixed(2)} m/s²` : "—" },
+                        { icon: "🔄", label: "Quickest Lat. Agility", value: sessions[0].highlights?.find(h => h.label.toLowerCase().includes("turn") || h.label.toLowerCase().includes("lateral"))?.value ?? sessions[0].highlights?.[1]?.value ?? "—" },
+                      ].map(m => (
+                        <div key={m.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                          <span style={{ fontSize: 22 }}>{m.icon}</span>
+                          <div>
+                            <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{m.label}:</p>
+                            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{m.value}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── TOP MOMENTS ── */}
+                  {topMoments.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Top Moments</p>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+                        {topMoments.slice(0, 3).map((h, i) => {
+                          const meta = [{ icon: "⚡", color: "#10B981" }, { icon: "🚀", color: "#A78BFA" }, { icon: "🔄", color: "#06B6D4" }][i] ?? { icon: "📊", color: "#10B981" };
+                          return (
+                            <div key={i} style={{ background: isDark ? "#141A17" : "white", border: `1px solid ${border}`, borderRadius: 16, padding: "20px 18px", position: "relative", overflow: "hidden" }}>
+                              {/* glow behind */}
+                              <div style={{ position: "absolute", top: -28, right: -28, width: 100, height: 100, borderRadius: "50%", background: `radial-gradient(circle, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${meta.color}18`, border: `1px solid ${meta.color}28`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{meta.icon}</div>
+                                <p style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h.label}</p>
+                              </div>
+                              {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 32, color: text1, lineHeight: 1, marginBottom: 6 }}>{h.value}</p>}
+                              <p style={{ fontSize: 11, color: text2 }}>at {h.timestamp_s.toFixed(1)}s · {h.sessionName}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── AI INSIGHTS (top 3 + "View full breakdown" toggle) ── */}
+                  {(() => {
+                    const allInsights: string[] = Array.from(new Set(sessions.flatMap(s => (s as any).trainingSuggestions as string[] || [])));
+                    const top = allInsights.slice(0, 3);
+                    const extra = allInsights.slice(3);
+                    if (!top.length) return null;
+                    return (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>AI Insights</p>
+                          {extra.length > 0 && (
+                            <button onClick={() => setShowAllInsights(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#10B981", padding: 0 }}>
+                              {showAllInsights ? "Show less ▲" : `View full breakdown (${extra.length} more) ▼`}
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {(showAllInsights ? allInsights : top).map((insight, i) => (
+                            <div key={i} style={{ display: "flex", gap: 12, background: isDark ? "rgba(5,150,105,0.06)" : "#F0FDF9", border: `1px solid ${isDark ? "rgba(5,150,105,0.12)" : "rgba(5,150,105,0.18)"}`, borderRadius: 12, padding: "12px 14px" }}>
+                              <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.28)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                                <span style={{ fontSize: 10, fontWeight: 800, color: "#10B981" }}>{i + 1}</span>
+                              </div>
+                              <p style={{ fontSize: 13, color: isDark ? "rgba(255,255,255,0.65)" : "#374151", lineHeight: 1.55 }}>{insight}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── MOVEMENT SIGNATURES ── */}
+                  {allMoves.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 10 }}>Movement Signatures</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {allMoves.map(m => (
+                          <span key={m} style={{ fontSize: 12, fontWeight: 700, background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", color: "#10B981", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 100, padding: "6px 14px", display: "flex", alignItems: "center", gap: 5 }}>
+                            <svg width="10" height="10" viewBox="0 0 12 12" fill="#10B981"><path d="M2 6l3 3 5-5" stroke="#10B981" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+                            {m}
+                          </span>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {/* ── Moves detected (short pills) ── */}
-                  {allMoves.length > 0 && (
-                    <div style={{ marginBottom: 28 }}>
-                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Movement Patterns</p>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {allMoves.map(m => <span key={m} style={{ fontSize: 12, fontWeight: 700, background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", color: "#10B981", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 100, padding: "6px 14px" }}>{m}</span>)}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Pinned sessions ── */}
-                  {pinnedSessions.length > 0 && (
-                    <div style={{ marginBottom: 28 }}>
-                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Pinned Sessions <span style={{ fontSize: 12, color: text2, fontWeight: 600 }}>({pinnedSessions.length}/3)</span></p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {pinnedSessions.map(s => <SessionCard key={s.id} session={s} onRemove={() => removeSession(s.id)} pinned={true} onPin={() => togglePin(s.id)} />)}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── All sessions ── */}
+                  {/* ── ALL SESSIONS — YouTube-style thumbnail grid ── */}
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                       <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>All Sessions <span style={{ fontSize: 13, color: text2, fontWeight: 600 }}>({sessions.length})</span></p>
                       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                         {compareIds.length === 0 && sessions.length >= 2 && (
                           <span style={{ fontSize: 11, color: text2, fontWeight: 600 }}>Select 2 to compare</span>
                         )}
-                        <Link href="/analyze" style={{ fontSize: 13, fontWeight: 700, color: "#10B981", textDecoration: "none" }}>+ Add →</Link>
+                        <Link href="/analyze" style={{ fontSize: 13, fontWeight: 700, color: "#10B981", textDecoration: "none" }}>+ Add Video →</Link>
                       </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {sessions.map(s => <SessionCard key={s.id} session={s} onRemove={() => removeSession(s.id)} pinned={pinnedIds.includes(s.id)} onPin={() => togglePin(s.id)} selected={compareIds.includes(s.id)} onSelect={() => toggleCompare(s.id)} />)}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
+                      {sessions.map((s, idx) => {
+                        const thumb = s.thumbnail || SESSION_THUMBS[idx % SESSION_THUMBS.length];
+                        const rc = { color: riskColor(s.overallRisk), label: riskLabel(s.overallRisk) };
+                        const isSelected = compareIds.includes(s.id);
+                        return (
+                          <div key={s.id} style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${isSelected ? "rgba(5,150,105,0.5)" : border}`, background: isDark ? "#141A17" : "white", boxShadow: isSelected ? "0 0 0 2px rgba(5,150,105,0.25)" : "none", transition: "box-shadow 0.15s" }}>
+                            {/* Thumbnail */}
+                            <div style={{ position: "relative", height: 148, cursor: "pointer" }} onClick={() => toggleCompare(s.id)}>
+                              <img src={thumb} alt="" crossOrigin={s.thumbnail ? undefined : "anonymous"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.62) 100%)" }} />
+                              {/* Compare checkbox */}
+                              <div style={{ position: "absolute", top: 8, left: 8, width: 20, height: 20, borderRadius: 6, border: `2px solid ${isSelected ? "#059669" : "rgba(255,255,255,0.4)"}`, background: isSelected ? "#059669" : "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {isSelected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                              </div>
+                              {/* Play button */}
+                              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                <div style={{ width: 42, height: 42, borderRadius: "50%", background: "rgba(0,0,0,0.48)", border: "2px solid rgba(255,255,255,0.38)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                </div>
+                              </div>
+                              {/* Speed badge */}
+                              {s.peakSpeedMs && <div style={{ position: "absolute", top: 8, right: 8, background: "rgba(5,150,105,0.9)", borderRadius: 6, padding: "3px 8px" }}><span style={{ fontSize: 11, fontWeight: 800, color: "white" }}>{s.peakSpeedMs.toFixed(1)} m/s</span></div>}
+                              {/* Risk badge */}
+                              {s.overallRisk && <div style={{ position: "absolute", bottom: 8, left: 8, background: `${rc.color}28`, border: `1px solid ${rc.color}55`, borderRadius: 6, padding: "2px 7px", backdropFilter: "blur(4px)" }}><span style={{ fontSize: 9, fontWeight: 800, color: rc.color }}>{rc.label}</span></div>}
+                              {/* Duration */}
+                              <span style={{ position: "absolute", bottom: 8, right: 8, fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.7)", background: "rgba(0,0,0,0.45)", borderRadius: 4, padding: "2px 6px" }}>{s.videoDuration.toFixed(0)}s</span>
+                            </div>
+                            {/* Info row */}
+                            <div style={{ padding: "10px 12px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <p style={{ fontSize: 12, fontWeight: 700, color: text1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 2 }}>{s.videoName}</p>
+                                <p style={{ fontSize: 10, color: text2 }}>{new Date(s.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}{s.peakTorqueNm ? ` · ${s.peakTorqueNm.toFixed(0)} Nm` : ""}</p>
+                              </div>
+                              <div style={{ display: "flex", gap: 4, marginLeft: 8, flexShrink: 0 }}>
+                                <button onClick={() => togglePin(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: pinnedIds.includes(s.id) ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${pinnedIds.includes(s.id) ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)"}`, cursor: "pointer", color: pinnedIds.includes(s.id) ? "#FBBF24" : "rgba(255,255,255,0.25)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>★</button>
+                                <button onClick={() => removeSession(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", color: "rgba(255,255,255,0.2)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </>

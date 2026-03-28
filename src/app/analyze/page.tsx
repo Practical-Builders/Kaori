@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useProfile, AnalysisSession } from "@/contexts/ProfileContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -62,8 +62,10 @@ export default function AnalyzePage() {
   const [trimStart,     setTrimStart]     = useState(0);
   const [trimEnd,       setTrimEnd]       = useState(0);
   const [targetX,       setTargetX]       = useState<number | null>(null);
+  const [targetY,       setTargetY]       = useState<number | null>(null);
   const [markerPct,     setMarkerPct]     = useState<number | null>(null);
   const [pickMode,      setPickMode]      = useState(false);
+  const [overlayEnabled, setOverlayEnabled] = useState(true);
   const [result,        setResult]        = useState<AnalysisSession | null>(null);
   const [summaryOpen,   setSummaryOpen]   = useState(false);
   const [movesOpen,     setMovesOpen]     = useState(false);
@@ -72,7 +74,151 @@ export default function AnalyzePage() {
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const videoRef   = useRef<HTMLVideoElement>(null);
+  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  const animRef    = useRef<number>(0);
   const videoUrl   = useMemo(() => file ? URL.createObjectURL(file) : null, [file]);
+
+  // ── Canvas overlay drawing ──────────────────────────────────────────────────
+  function drawSkeleton(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, color: string, now: number) {
+    const sway = Math.sin(now * 0.0015) * scale * 0.04;
+    const joints: Record<string, [number, number]> = {
+      head:      [sway * 0.3,       -scale * 1.12],
+      neck:      [sway * 0.2,       -scale * 0.88],
+      lShoulder: [-scale * 0.28 + sway, -scale * 0.72],
+      rShoulder: [ scale * 0.28 + sway, -scale * 0.72],
+      lElbow:    [-scale * 0.40,    -scale * 0.40],
+      rElbow:    [ scale * 0.40,    -scale * 0.40],
+      lWrist:    [-scale * 0.34,    -scale * 0.10],
+      rWrist:    [ scale * 0.34,    -scale * 0.10],
+      lHip:      [-scale * 0.15,     0],
+      rHip:      [ scale * 0.15,     0],
+      lKnee:     [-scale * 0.18,     scale * 0.46],
+      rKnee:     [ scale * 0.18,     scale * 0.46],
+      lAnkle:    [-scale * 0.16,     scale * 0.88],
+      rAnkle:    [ scale * 0.16,     scale * 0.88],
+    };
+    const bones: [string, string][] = [
+      ["head","neck"],
+      ["neck","lShoulder"],["neck","rShoulder"],
+      ["neck","lHip"],["neck","rHip"],
+      ["lShoulder","lElbow"],["lElbow","lWrist"],
+      ["rShoulder","rElbow"],["rElbow","rWrist"],
+      ["lHip","rHip"],
+      ["lHip","lKnee"],["lKnee","lAnkle"],
+      ["rHip","rKnee"],["rKnee","rAnkle"],
+    ];
+    // Glow pass
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 6;
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2;
+    ctx.globalAlpha = 0.85;
+    bones.forEach(([a, b]) => {
+      const [ax, ay] = joints[a]; const [bx, by] = joints[b];
+      ctx.beginPath(); ctx.moveTo(cx + ax, cy + ay); ctx.lineTo(cx + bx, cy + by); ctx.stroke();
+    });
+    // Joints
+    ctx.shadowBlur = 0;
+    Object.entries(joints).forEach(([name, [jx, jy]]) => {
+      const r = name === "head" ? 7 : 3.5;
+      ctx.beginPath(); ctx.arc(cx + jx, cy + jy, r, 0, Math.PI * 2);
+      ctx.fillStyle = name === "head" ? "rgba(255,255,255,0.95)" : color;
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur  = 0;
+  }
+
+  function drawOverlay() {
+    const canvas = canvasRef.current;
+    const video  = videoRef.current;
+    if (!canvas || !video) { animRef.current = requestAnimationFrame(drawOverlay); return; }
+    canvas.width  = video.offsetWidth;
+    canvas.height = video.offsetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { animRef.current = requestAnimationFrame(drawOverlay); return; }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (markerPct === null) { animRef.current = requestAnimationFrame(drawOverlay); return; }
+
+    // Athlete position
+    const cx = (markerPct / 100) * canvas.width;
+    const markerY = targetY !== null ? targetY * canvas.height : canvas.height * 0.55;
+    const cy = markerY;
+
+    // Get current speed from kinematics
+    let currentSpeed = 0;
+    const sess = result;
+    if (sess?.kinematics?.timestamp_ms && sess.kinematics.ankle_speed_ms) {
+      const tMs = video.currentTime * 1000;
+      let closest = 0; let minDiff = Infinity;
+      (sess.kinematics.timestamp_ms as number[]).forEach((t, i) => {
+        const d = Math.abs(t - tMs); if (d < minDiff) { minDiff = d; closest = i; }
+      });
+      currentSpeed = (sess.kinematics.ankle_speed_ms as number[])[closest] ?? 0;
+    } else if (sess?.peakSpeedMs) {
+      currentSpeed = sess.peakSpeedMs * 0.85;
+    }
+
+    const color = currentSpeed >= 7.5 ? "#F97316" : currentSpeed >= 6 ? "#FBBF24" : "#10B981";
+    const now   = Date.now();
+    const pulse = (Math.sin(now * 0.004) + 1) / 2;
+
+    // Skeleton (scale ~1/5 of canvas height)
+    const skeletonScale = canvas.height * 0.18;
+    drawSkeleton(ctx, cx, cy - skeletonScale * 0.1, skeletonScale, color, now);
+
+    // Pulsing tracking ring at feet
+    const feetY = cy + skeletonScale * 0.88;
+    const ringR = 18 + pulse * 6;
+    ctx.beginPath(); ctx.ellipse(cx, feetY, ringR, ringR * 0.35, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.25 + pulse * 0.45; ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Speed HUD badge
+    const hudY = cy - skeletonScale * 1.28;
+    const speedTxt = currentSpeed > 0 ? `${currentSpeed.toFixed(2)} m/s` : sess?.peakSpeedMs ? `${sess.peakSpeedMs.toFixed(2)} m/s` : "— m/s";
+    const badgeW = 84; const badgeH = 26;
+    ctx.fillStyle = "rgba(0,0,0,0.72)";
+    ctx.beginPath(); (ctx as any).roundRect(cx - badgeW / 2, hudY - badgeH / 2, badgeW, badgeH, 7); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = color; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(speedTxt, cx, hudY);
+    // Connector
+    ctx.beginPath(); ctx.moveTo(cx, hudY + badgeH / 2); ctx.lineTo(cx, cy - skeletonScale * 1.12 - 8);
+    ctx.strokeStyle = `${color}55`; ctx.lineWidth = 1; ctx.stroke();
+
+    animRef.current = requestAnimationFrame(drawOverlay);
+  }
+
+  useEffect(() => {
+    if (overlayEnabled && (markerPct !== null || result)) {
+      animRef.current = requestAnimationFrame(drawOverlay);
+    } else {
+      cancelAnimationFrame(animRef.current);
+      const canvas = canvasRef.current;
+      if (canvas) { const ctx = canvas.getContext("2d"); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
+    }
+    return () => cancelAnimationFrame(animRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayEnabled, markerPct, result]);
+
+  // ── Capture thumbnail ──────────────────────────────────────────────────────
+  function captureThumbnail(): string | undefined {
+    const v = videoRef.current;
+    if (!v || v.readyState < 2) return undefined;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width  = 480;
+      canvas.height = Math.round(480 * (v.videoHeight / v.videoWidth)) || 270;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return undefined;
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.75);
+    } catch {
+      return undefined;
+    }
+  }
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
 
   // Force dark mode on this page
@@ -102,15 +248,16 @@ export default function AnalyzePage() {
     if (v.currentTime < trimStart) v.currentTime = trimStart;
   }
 
-  // Click on video to pick athlete
+  // Click on video to pick athlete — capture both X and Y
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
     if (!pickMode) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pct  = (e.clientX - rect.left) / rect.width;
-    setTargetX(pct);
-    setMarkerPct(pct * 100);
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top)  / rect.height;
+    setTargetX(x);
+    setTargetY(y);
+    setMarkerPct(x * 100);
     setPickMode(false);
-    // Pause video when picking
     videoRef.current?.pause();
   }
 
@@ -179,9 +326,12 @@ export default function AnalyzePage() {
       const asymArr = data.cleaned_kinematics?.torque_asymmetry_pct?.filter((v: any) => v != null) ?? [];
       const meanAsym = asymArr.length ? asymArr.reduce((a: number, b: number) => a + b, 0) / asymArr.length : null;
 
+      const thumbnail = captureThumbnail();
+
       const session: AnalysisSession = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
+        thumbnail,
         videoName: clipName || file.name.replace(/\.[^.]+$/, ""),
         videoDuration: data.cleaned_kinematics?.timestamp_ms?.slice(-1)[0] / 1000 ?? videoDuration,
         geminiSummary: gemini.summary,
@@ -335,7 +485,7 @@ export default function AnalyzePage() {
               <Link href="/profile" style={{ flex: 1, padding: "14px 0", borderRadius: 14, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 15, textAlign: "center", textDecoration: "none", boxShadow: "0 8px 24px rgba(5,150,105,0.35)" }}>
                 View Profile →
               </Link>
-              <button onClick={() => { setStatus("idle"); setFile(null); setResult(null); setProgress(0); setTargetX(null); setMarkerPct(null); setClipName(""); setSummaryOpen(false); setMovesOpen(false); setSuggestOpen(false); }}
+              <button onClick={() => { setStatus("idle"); setFile(null); setResult(null); setProgress(0); setTargetX(null); setTargetY(null); setMarkerPct(null); setClipName(""); setSummaryOpen(false); setMovesOpen(false); setSuggestOpen(false); }}
                 style={{ padding: "14px 20px", borderRadius: 14, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
                 New Analysis
               </button>
@@ -374,7 +524,7 @@ export default function AnalyzePage() {
               /* Video preview card */
               <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "#0E1410" }}>
 
-                {/* Video element with athlete picker overlay */}
+                {/* Video + canvas overlay */}
                 <div style={{ position: "relative", cursor: pickMode ? "crosshair" : "default" }} onClick={handleVideoClick}>
                   <video
                     ref={videoRef}
@@ -388,75 +538,82 @@ export default function AnalyzePage() {
                     }}
                     style={{ width: "100%", display: "block", maxHeight: 360, background: "#000", pointerEvents: pickMode ? "none" : "auto" }}
                   />
+                  {/* Canvas skeleton/HUD overlay */}
+                  <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 10 }} />
 
-                  {/* Athlete marker */}
-                  {markerPct !== null && (
-                    <div style={{ position: "absolute", top: 0, bottom: 0, left: `${markerPct}%`, transform: "translateX(-50%)", pointerEvents: "none" }}>
-                      <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 40, height: 40, borderRadius: "50%", border: "3px solid #10B981", boxShadow: "0 0 0 4px rgba(16,185,129,0.3)", background: "rgba(16,185,129,0.15)" }} />
-                      <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", width: 2, background: "rgba(16,185,129,0.4)", transform: "translateX(-50%)" }} />
-                    </div>
-                  )}
-
-                  {/* Pick mode overlay */}
+                  {/* Pick mode UI */}
                   {pickMode && (
-                    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <div style={{ background: "rgba(10,15,13,0.9)", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 14, padding: "16px 24px", textAlign: "center" }}>
-                        <p style={{ color: "#10B981", fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Click on the athlete to track</p>
-                        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>Pause the video first for best results</p>
+                    <div style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }}>
+                      {/* Scanline grid */}
+                      <div style={{ position: "absolute", inset: 0, backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(16,185,129,0.06) 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(16,185,129,0.06) 40px)" }} />
+                      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.38)" }} />
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ background: "rgba(5,15,10,0.88)", border: "1px solid rgba(16,185,129,0.45)", borderRadius: 14, padding: "14px 22px", textAlign: "center", backdropFilter: "blur(8px)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 8px #10B981" }} />
+                            <p style={{ color: "#10B981", fontWeight: 800, fontSize: 14, letterSpacing: "0.04em" }}>TAP TO LOCK ATHLETE</p>
+                          </div>
+                          <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11 }}>Pause first for best precision</p>
+                        </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Clip name + pick controls */}
-                <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                  {/* Rename */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                {/* Controls bar */}
+                <div style={{ padding: "14px 18px", borderTop: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", gap: 12 }}>
+                  {/* Row 1: rename + overlay toggle */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {renamingClip ? (
-                      <input
-                        autoFocus
-                        value={clipName}
-                        onChange={e => setClipName(e.target.value)}
-                        onBlur={() => setRenamingClip(false)}
-                        onKeyDown={e => e.key === "Enter" && setRenamingClip(false)}
-                        style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(5,150,105,0.4)", borderRadius: 9, padding: "8px 12px", color: "white", fontSize: 15, fontWeight: 700, outline: "none", fontFamily: "var(--font-display)" }}
-                      />
+                      <input autoFocus value={clipName} onChange={e => setClipName(e.target.value)}
+                        onBlur={() => setRenamingClip(false)} onKeyDown={e => e.key === "Enter" && setRenamingClip(false)}
+                        style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(5,150,105,0.4)", borderRadius: 9, padding: "8px 12px", color: "white", fontSize: 15, fontWeight: 700, outline: "none", fontFamily: "var(--font-display)" }} />
                     ) : (
-                      <p style={{ flex: 1, fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: "white", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <p style={{ flex: 1, fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 15, color: "white", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {clipName || file.name.replace(/\.[^.]+$/, "")}
                       </p>
                     )}
                     <button type="button" onClick={() => { if (!renamingClip) setClipName(clipName || file.name.replace(/\.[^.]+$/, "")); setRenamingClip(r => !r); }}
-                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "7px 12px", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
                       {renamingClip ? "Done" : "Rename"}
                     </button>
+                    {/* Data Overlay toggle */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Overlay</span>
+                      <button type="button" onClick={() => setOverlayEnabled(v => !v)} style={{ position: "relative", width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer", background: overlayEnabled ? "#059669" : "rgba(255,255,255,0.1)", transition: "background 0.2s", flexShrink: 0 }}>
+                        <span style={{ position: "absolute", top: 2, left: overlayEnabled ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "white", boxShadow: "0 1px 4px rgba(0,0,0,0.3)", transition: "left 0.2s" }} />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Athlete picker button */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {/* Row 2: Athlete selection */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button type="button"
                       onClick={() => { setPickMode(p => !p); if (!pickMode) videoRef.current?.pause(); }}
-                      style={{ flex: 1, padding: "10px 16px", borderRadius: 10, border: `1px solid ${pickMode ? "rgba(16,185,129,0.5)" : "rgba(255,255,255,0.1)"}`, background: pickMode ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.04)", color: pickMode ? "#10B981" : "rgba(255,255,255,0.5)", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.15s" }}>
-                      {pickMode ? "Click on athlete in video ↑" : markerPct !== null ? "Athlete selected — click to change" : "Select athlete to track"}
+                      style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${pickMode ? "rgba(16,185,129,0.55)" : markerPct !== null ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.1)"}`, background: pickMode ? "rgba(16,185,129,0.12)" : markerPct !== null ? "rgba(16,185,129,0.07)" : "rgba(255,255,255,0.04)", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${markerPct !== null ? "#10B981" : "rgba(255,255,255,0.3)"}`, background: markerPct !== null ? "rgba(16,185,129,0.2)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {markerPct !== null && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10B981" }} />}
+                      </div>
+                      <span style={{ color: pickMode ? "#10B981" : markerPct !== null ? "#34D399" : "rgba(255,255,255,0.5)" }}>
+                        {pickMode ? "Tap athlete in frame ↑" : markerPct !== null ? "Athlete locked — tap to reselect" : "Select athlete to track"}
+                      </span>
                     </button>
                     {markerPct !== null && (
-                      <button type="button" onClick={() => { setTargetX(null); setMarkerPct(null); }}
+                      <button type="button" onClick={() => { setTargetX(null); setTargetY(null); setMarkerPct(null); }}
                         style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.3)", fontSize: 12, cursor: "pointer" }}>
                         Clear
                       </button>
                     )}
                   </div>
                   {markerPct === null && !pickMode && (
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", marginTop: 8 }}>
-                      Optional — if multiple athletes are in frame, pause the video and select who to track
-                    </p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.18)", marginTop: -4 }}>Optional — pause &amp; tap to lock onto a specific player. Skeleton &amp; HUD overlays update in real time.</p>
                   )}
                 </div>
 
                 {/* File info row */}
                 <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>{(file.size/1024/1024).toFixed(1)} MB</span>
-                  <button type="button" onClick={() => { setFile(null); setClipName(""); setTargetX(null); setMarkerPct(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.25)", fontSize: 12, fontWeight: 600 }}>
+                  <button type="button" onClick={() => { setFile(null); setClipName(""); setTargetX(null); setTargetY(null); setMarkerPct(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.25)", fontSize: 12, fontWeight: 600 }}>
                     Remove video
                   </button>
                 </div>
@@ -467,7 +624,7 @@ export default function AnalyzePage() {
               onChange={e => {
                 const f = e.target.files?.[0] ?? null;
                 setFile(f); setStatus("idle"); setResult(null);
-                setTargetX(null); setMarkerPct(null);
+                setTargetX(null); setTargetY(null); setMarkerPct(null);
                 if (f) setClipName(f.name.replace(/\.[^.]+$/, ""));
               }} disabled={isProcessing} />
 
@@ -525,7 +682,16 @@ export default function AnalyzePage() {
 
             {status === "error" && (
               <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 14, padding: "14px 18px" }}>
-                <p style={{ color: "#FCA5A5", fontWeight: 600, fontSize: 14 }}>Error: {statusMsg}</p>
+                <p style={{ color: "#FCA5A5", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                  {statusMsg.includes("fetch") || statusMsg.includes("Load failed") || statusMsg.includes("Network")
+                    ? "Backend offline — make sure the analysis server is running on localhost:8000"
+                    : `Error: ${statusMsg}`}
+                </p>
+                <p style={{ color: "rgba(255,100,100,0.5)", fontSize: 12 }}>
+                  {statusMsg.includes("fetch") || statusMsg.includes("Load failed") || statusMsg.includes("Network")
+                    ? "Run: cd soccer-biomechanics-ai && python main.py"
+                    : "Check your connection and try again."}
+                </p>
               </div>
             )}
 

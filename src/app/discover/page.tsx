@@ -109,8 +109,11 @@ function AthleteCard({ athlete, onShortlist, shortlisted }: { athlete: DemoAthle
 
       {/* Top section */}
       <div style={{ padding: "20px 20px 16px", display: "flex", gap: 14, alignItems: "flex-start" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 14, overflow: "hidden", flexShrink: 0, border: "2px solid rgba(255,255,255,0.08)" }}>
-          <img src={athlete.photo} alt={athlete.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <div style={{ width: 56, height: 56, borderRadius: 14, overflow: "hidden", flexShrink: 0, border: "2px solid rgba(255,255,255,0.08)", background: "linear-gradient(135deg,#059669,#0D9488)", position: "relative" }}>
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "absolute", inset: 0 }}>
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 22, color: "white" }}>{athlete.name.charAt(0)}</span>
+          </div>
+          <img src={athlete.photo} alt={athlete.name} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: "white", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{athlete.name}</p>
@@ -158,7 +161,7 @@ function AthleteCard({ athlete, onShortlist, shortlisted }: { athlete: DemoAthle
           style={{ flex: 1, padding: "10px", borderRadius: 10, background: shortlisted ? "rgba(5,150,105,0.15)" : "transparent", border: `1px solid ${shortlisted ? "rgba(5,150,105,0.4)" : "rgba(255,255,255,0.1)"}`, color: shortlisted ? "#10B981" : "rgba(255,255,255,0.4)", fontWeight: 700, fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}>
           {shortlisted ? "★ Shortlisted" : "☆ Shortlist"}
         </button>
-        <Link href="/athlete" style={{ flex: 1, padding: "10px", borderRadius: 10, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(5,150,105,0.25)" }}>
+        <Link href={athlete.id === "current_user" ? "/athlete" : `/athlete?id=${athlete.id}`} style={{ flex: 1, padding: "10px", borderRadius: 10, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(5,150,105,0.25)" }}>
           View Profile →
         </Link>
       </div>
