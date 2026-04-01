@@ -15,6 +15,95 @@ const THEME_KEY   = "kickiq_theme";
 const POSITIONS = ["Goalkeeper","Defender","Center Back","Full Back","Midfielder",
   "Defensive Mid","Central Mid","Attacking Mid","Winger","Forward","Striker"];
 const YEARS = ["Freshman","Sophomore","Junior","Senior","Graduate","Professional","Youth Academy"];
+const CONV_KEY = "kickiq_conversations";
+
+// ── Messaging types ───────────────────────────────────────────────────────────
+type ChatMessage = { id: string; from: "me" | "them"; text: string; ts: string };
+type Conversation = {
+  id: string;
+  participantId: string;
+  participantName: string;
+  participantRole: "athlete" | "recruiter";
+  participantInitial: string;
+  unread: number;
+  messages: ChatMessage[];
+};
+
+// ── Mock athletes (Scout Board seed data) ────────────────────────────────────
+type MockAthlete = {
+  id: string; name: string; age: number; position: string; club: string;
+  location: string; peakSpeedMs: number; symmetryScore: number;
+  overallRisk: "low" | "moderate" | "high"; nationality: string;
+  heightCm: number; weightKg: number; photoInitial: string;
+};
+const MOCK_ATHLETES: MockAthlete[] = [
+  { id: "ma1", name: "Diego Morales",   age: 19, position: "Winger",        club: "FC Valencia B",    location: "Valencia, ESP",    peakSpeedMs: 9.8,  symmetryScore: 87, overallRisk: "low",      nationality: "Spanish",    heightCm: 174, weightKg: 68, photoInitial: "D" },
+  { id: "ma2", name: "Liam Okafor",     age: 20, position: "Striker",       club: "Ajax Academy",     location: "Amsterdam, NED",   peakSpeedMs: 9.3,  symmetryScore: 82, overallRisk: "low",      nationality: "Nigerian",   heightCm: 181, weightKg: 76, photoInitial: "L" },
+  { id: "ma3", name: "Kenji Yamamoto",  age: 18, position: "Central Mid",   club: "Gamba Osaka U-18", location: "Osaka, JPN",       peakSpeedMs: 8.7,  symmetryScore: 91, overallRisk: "low",      nationality: "Japanese",   heightCm: 172, weightKg: 65, photoInitial: "K" },
+  { id: "ma4", name: "Marco Esposito",  age: 21, position: "Defender",      club: "AS Roma Youth",    location: "Rome, ITA",        peakSpeedMs: 8.2,  symmetryScore: 78, overallRisk: "moderate", nationality: "Italian",    heightCm: 183, weightKg: 79, photoInitial: "M" },
+  { id: "ma5", name: "Rasheed Al-Amri", age: 19, position: "Attacking Mid", club: "Al-Nassr U-21",    location: "Riyadh, KSA",      peakSpeedMs: 9.1,  symmetryScore: 85, overallRisk: "low",      nationality: "Saudi",      heightCm: 176, weightKg: 70, photoInitial: "R" },
+  { id: "ma6", name: "Tyler Rousseau",  age: 22, position: "Goalkeeper",    club: "CF Montréal Res.",  location: "Montreal, CAN",    peakSpeedMs: 7.4,  symmetryScore: 80, overallRisk: "low",      nationality: "Canadian",   heightCm: 189, weightKg: 83, photoInitial: "T" },
+  { id: "ma7", name: "Sofia Chen",      age: 20, position: "Defensive Mid", club: "Portland Thorns II",location: "Portland, USA",    peakSpeedMs: 8.5,  symmetryScore: 88, overallRisk: "low",      nationality: "American",   heightCm: 168, weightKg: 62, photoInitial: "S" },
+  { id: "ma8", name: "Enzo Fernandez",  age: 21, position: "Forward",       club: "River Plate B",    location: "Buenos Aires, ARG",peakSpeedMs: 9.5,  symmetryScore: 74, overallRisk: "moderate", nationality: "Argentine",  heightCm: 179, weightKg: 74, photoInitial: "E" },
+];
+
+// ── Seed conversations ────────────────────────────────────────────────────────
+function getOrSeedConversations(): Conversation[] {
+  try {
+    const raw = localStorage.getItem(CONV_KEY);
+    if (raw) return JSON.parse(raw) as Conversation[];
+    const seed: Conversation[] = [
+      {
+        id: "conv_001",
+        participantId: "ma1",
+        participantName: "Diego Morales",
+        participantRole: "athlete",
+        participantInitial: "D",
+        unread: 1,
+        messages: [
+          { id: "m1", from: "them", text: "Hey! I saw your profile on KickIQ. I'm really interested in your program.", ts: new Date(Date.now() - 86400000 * 2).toISOString() },
+          { id: "m2", from: "me",   text: "Hi Diego! Great to hear from you. Your speed numbers are impressive — 9.8 m/s peak.", ts: new Date(Date.now() - 86400000).toISOString() },
+          { id: "m3", from: "them", text: "Thanks! I've been working hard on my acceleration this preseason.", ts: new Date(Date.now() - 3600000).toISOString() },
+        ],
+      },
+      {
+        id: "conv_002",
+        participantId: "ma3",
+        participantName: "Kenji Yamamoto",
+        participantRole: "athlete",
+        participantInitial: "K",
+        unread: 0,
+        messages: [
+          { id: "m4", from: "them", text: "Coach, do you have time for a call this week? I want to discuss the scholarship options.", ts: new Date(Date.now() - 86400000 * 5).toISOString() },
+          { id: "m5", from: "me",   text: "Absolutely, Kenji. How about Thursday at 3 PM your time?", ts: new Date(Date.now() - 86400000 * 4).toISOString() },
+          { id: "m6", from: "them", text: "Perfect! I'll make sure to prepare some questions.", ts: new Date(Date.now() - 86400000 * 4 + 3600000).toISOString() },
+        ],
+      },
+    ];
+    localStorage.setItem(CONV_KEY, JSON.stringify(seed));
+    return seed;
+  } catch { return []; }
+}
+
+// ── Auto-reply generator ─────────────────────────────────────────────────────
+function generateAutoReply(participantRole: "athlete" | "recruiter"): string {
+  const athleteReplies = [
+    "Thanks for reaching out! I'd love to learn more about your program.",
+    "That's great to hear! I've been training really hard this season.",
+    "Absolutely, I'd be happy to send over my highlight reel.",
+    "Thanks coach! I've always dreamed of playing at that level.",
+    "I appreciate the interest! When would be a good time to chat?",
+  ];
+  const recruiterReplies = [
+    "Great question. I'll review your latest session footage before our call.",
+    "We have some exciting opportunities available. Let's set up a time to talk.",
+    "I'll get back to you with the full scholarship breakdown by end of week.",
+    "Thanks for your interest! Our program is a great fit for your profile.",
+    "I've shared your stats with our coaching staff. Very promising numbers.",
+  ];
+  const pool = participantRole === "athlete" ? athleteReplies : recruiterReplies;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function riskColor(l?: string) {
@@ -375,6 +464,277 @@ function SessionCard({ session, onRemove, pinned, onPin, selected, onSelect }: {
   );
 }
 
+// ── Messaging Panel ──────────────────────────────────────────────────────────
+function MessagingPanel({
+  isDark, bg, card, border, text1, text2,
+  activeMsgConvId, setActiveMsgConvId,
+  openWithAthleteId,
+  isRecruiter,
+}: {
+  isDark: boolean; bg: string; card: string; border: string; text1: string; text2: string;
+  activeMsgConvId: string | null; setActiveMsgConvId: (id: string | null) => void;
+  openWithAthleteId: string | null;
+  isRecruiter: boolean;
+}) {
+  const [convs, setConvs] = useState<Conversation[]>([]);
+  const [search, setSearch] = useState("");
+  const [input, setInput] = useState("");
+  const [newMsgOpen, setNewMsgOpen] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Load/seed conversations
+  useEffect(() => {
+    setConvs(getOrSeedConversations());
+  }, []);
+
+  // If openWithAthleteId is set, open or create that conversation
+  useEffect(() => {
+    if (!openWithAthleteId) return;
+    setConvs(prev => {
+      const existing = prev.find(c => c.participantId === openWithAthleteId);
+      if (existing) {
+        setActiveMsgConvId(existing.id);
+        return prev;
+      }
+      const athlete = MOCK_ATHLETES.find(a => a.id === openWithAthleteId);
+      if (!athlete) return prev;
+      const newConv: Conversation = {
+        id: `conv_${Date.now()}`,
+        participantId: athlete.id,
+        participantName: athlete.name,
+        participantRole: "athlete",
+        participantInitial: athlete.photoInitial,
+        unread: 0,
+        messages: [],
+      };
+      const updated = [newConv, ...prev];
+      try { localStorage.setItem(CONV_KEY, JSON.stringify(updated)); } catch {}
+      setActiveMsgConvId(newConv.id);
+      return updated;
+    });
+  }, [openWithAthleteId]);
+
+  // Scroll to bottom when active conv changes or messages added
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeMsgConvId, convs]);
+
+  function persistConvs(updated: Conversation[]) {
+    try { localStorage.setItem(CONV_KEY, JSON.stringify(updated)); } catch {}
+    setConvs(updated);
+  }
+
+  function sendMessage() {
+    if (!input.trim() || !activeMsgConvId) return;
+    const msg: ChatMessage = { id: `m_${Date.now()}`, from: "me", text: input.trim(), ts: new Date().toISOString() };
+    const updated = convs.map(c => c.id === activeMsgConvId
+      ? { ...c, messages: [...c.messages, msg], unread: 0 }
+      : c
+    );
+    persistConvs(updated);
+    setInput("");
+    // Auto-reply
+    const conv = updated.find(c => c.id === activeMsgConvId);
+    if (!conv) return;
+    const role = conv.participantRole;
+    setTimeout(() => {
+      const reply: ChatMessage = { id: `m_${Date.now()}_r`, from: "them", text: generateAutoReply(role), ts: new Date().toISOString() };
+      setConvs(prev => {
+        const u = prev.map(c => c.id === activeMsgConvId
+          ? { ...c, messages: [...c.messages, reply] }
+          : c
+        );
+        try { localStorage.setItem(CONV_KEY, JSON.stringify(u)); } catch {}
+        return u;
+      });
+    }, 1500);
+  }
+
+  function startNewConv(athlete: MockAthlete) {
+    setNewMsgOpen(false);
+    setConvs(prev => {
+      const existing = prev.find(c => c.participantId === athlete.id);
+      if (existing) { setActiveMsgConvId(existing.id); return prev; }
+      const newConv: Conversation = {
+        id: `conv_${Date.now()}`,
+        participantId: athlete.id,
+        participantName: athlete.name,
+        participantRole: "athlete",
+        participantInitial: athlete.photoInitial,
+        unread: 0,
+        messages: [],
+      };
+      const updated = [newConv, ...prev];
+      try { localStorage.setItem(CONV_KEY, JSON.stringify(updated)); } catch {}
+      setActiveMsgConvId(newConv.id);
+      return updated;
+    });
+  }
+
+  function markRead(convId: string) {
+    setConvs(prev => {
+      const u = prev.map(c => c.id === convId ? { ...c, unread: 0 } : c);
+      try { localStorage.setItem(CONV_KEY, JSON.stringify(u)); } catch {}
+      return u;
+    });
+  }
+
+  const filtered = convs.filter(c => c.participantName.toLowerCase().includes(search.toLowerCase()));
+  const activeConv = convs.find(c => c.id === activeMsgConvId) ?? null;
+
+  function fmtTime(ts: string) {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    if (diffMs < 60000) return "now";
+    if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m`;
+    if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)}h`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  return (
+    <div style={{ display: "flex", height: "calc(100vh - 200px)", minHeight: 500, background: card, border: `1px solid ${border}`, borderRadius: 18, overflow: "hidden" }}>
+      {/* Left panel — conversation list */}
+      <div style={{ width: 320, flexShrink: 0, borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column" }}>
+        {/* Header */}
+        <div style={{ padding: "18px 16px 12px", borderBottom: `1px solid ${border}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1 }}>Messages</p>
+            {isRecruiter && (
+              <button onClick={() => setNewMsgOpen(true)} style={{ padding: "5px 12px", borderRadius: 20, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ New</button>
+            )}
+          </div>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search conversations..."
+            style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.06)", border: `1px solid ${border}`, borderRadius: 10, padding: "8px 12px", fontSize: 13, color: text1, outline: "none", fontFamily: "inherit", boxSizing: "border-box" }}
+          />
+        </div>
+        {/* Conversation list */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: "40px 16px", textAlign: "center" }}>
+              <p style={{ color: text2, fontSize: 13 }}>No conversations yet.</p>
+            </div>
+          )}
+          {filtered.map((conv, i) => {
+            const last = conv.messages[conv.messages.length - 1];
+            const isActive = activeMsgConvId === conv.id;
+            return (
+              <button
+                key={conv.id}
+                onClick={() => { setActiveMsgConvId(conv.id); markRead(conv.id); }}
+                style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "12px 16px", background: isActive ? (isDark ? "rgba(5,150,105,0.12)" : "#F0FDF9") : "none", border: "none", borderTop: i > 0 ? `1px solid ${border}` : "none", cursor: "pointer", textAlign: "left", transition: "background 0.12s" }}
+              >
+                {/* Avatar */}
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ color: "white", fontWeight: 800, fontSize: 15, fontFamily: "var(--font-display)" }}>{conv.participantInitial}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: isActive ? "#10B981" : text1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.participantName}</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                      {last && <span style={{ fontSize: 10, color: text2 }}>{fmtTime(last.ts)}</span>}
+                      {conv.unread > 0 && <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#059669", color: "white", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{conv.unread}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, background: conv.participantRole === "athlete" ? "rgba(5,150,105,0.12)" : "rgba(13,148,136,0.12)", color: conv.participantRole === "athlete" ? "#10B981" : "#0D9488", border: `1px solid ${conv.participantRole === "athlete" ? "rgba(5,150,105,0.25)" : "rgba(13,148,136,0.25)"}`, borderRadius: 100, padding: "1px 6px", textTransform: "capitalize" }}>{conv.participantRole}</span>
+                    {last && <p style={{ fontSize: 11, color: text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{last.from === "me" ? "You: " : ""}{last.text.slice(0, 40)}{last.text.length > 40 ? "…" : ""}</p>}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right panel — chat view */}
+      {activeConv ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          {/* Chat header */}
+          <div style={{ padding: "16px 20px", borderBottom: `1px solid ${border}`, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <span style={{ color: "white", fontWeight: 800, fontSize: 13, fontFamily: "var(--font-display)" }}>{activeConv.participantInitial}</span>
+            </div>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 15, color: text1 }}>{activeConv.participantName}</p>
+              <span style={{ fontSize: 9, fontWeight: 700, background: activeConv.participantRole === "athlete" ? "rgba(5,150,105,0.12)" : "rgba(13,148,136,0.12)", color: activeConv.participantRole === "athlete" ? "#10B981" : "#0D9488", border: `1px solid ${activeConv.participantRole === "athlete" ? "rgba(5,150,105,0.25)" : "rgba(13,148,136,0.25)"}`, borderRadius: 100, padding: "1px 7px", textTransform: "capitalize" }}>{activeConv.participantRole}</span>
+            </div>
+          </div>
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {activeConv.messages.length === 0 && (
+              <div style={{ margin: "auto", textAlign: "center" }}>
+                <p style={{ color: text2, fontSize: 13 }}>No messages yet. Say hello!</p>
+              </div>
+            )}
+            {activeConv.messages.map(msg => (
+              <div key={msg.id} style={{ display: "flex", justifyContent: msg.from === "me" ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth: "72%", padding: "10px 14px", borderRadius: msg.from === "me" ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: msg.from === "me" ? "linear-gradient(135deg,#059669,#0D9488)" : (isDark ? "rgba(255,255,255,0.07)" : "#F3F4F6"), border: msg.from === "me" ? "none" : `1px solid ${border}` }}>
+                  <p style={{ fontSize: 13, color: msg.from === "me" ? "white" : text1, lineHeight: 1.5 }}>{msg.text}</p>
+                  <p style={{ fontSize: 9, color: msg.from === "me" ? "rgba(255,255,255,0.55)" : text2, marginTop: 4, textAlign: "right" }}>{fmtTime(msg.ts)}</p>
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+          {/* Input bar */}
+          <div style={{ padding: "12px 16px", borderTop: `1px solid ${border}`, display: "flex", gap: 10 }}>
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              placeholder="Type a message..."
+              style={{ flex: 1, background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.06)", border: `1px solid ${border}`, borderRadius: 12, padding: "10px 14px", fontSize: 13, color: text1, outline: "none", fontFamily: "inherit" }}
+            />
+            <button onClick={sendMessage} style={{ padding: "10px 18px", borderRadius: 12, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>Send</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 64, height: 64, borderRadius: "50%", background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.5" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <p style={{ fontWeight: 700, fontSize: 16, color: text1, marginBottom: 6 }}>Select a conversation</p>
+            <p style={{ color: text2, fontSize: 13 }}>Choose from the left or start a new message.</p>
+          </div>
+        </div>
+      )}
+
+      {/* New message modal (recruiter only) */}
+      {newMsgOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={() => setNewMsgOpen(false)} />
+          <div style={{ position: "relative", width: "100%", maxWidth: 480, maxHeight: "70vh", overflow: "auto", background: isDark ? "#111816" : "white", borderRadius: 20, boxShadow: "0 40px 100px rgba(0,0,0,0.5)", border: `1px solid ${border}` }}>
+            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>Message an Athlete</p>
+              <button onClick={() => setNewMsgOpen(false)} style={{ width: 32, height: 32, borderRadius: "50%", background: isDark ? "rgba(255,255,255,0.07)" : "#F3F4F6", border: "none", cursor: "pointer", color: text2, fontSize: 14 }}>✕</button>
+            </div>
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+              {MOCK_ATHLETES.map(a => (
+                <button key={a.id} onClick={() => startNewConv(a)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 12, background: "none", border: `1px solid ${border}`, cursor: "pointer", textAlign: "left", transition: "background 0.12s" }}>
+                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ color: "white", fontWeight: 800, fontSize: 13 }}>{a.photoInitial}</span>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: text1 }}>{a.name}</p>
+                    <p style={{ fontSize: 11, color: text2 }}>{a.position} · {a.club}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Edit Modal (for profile settings tab) ─────────────────────────────────────
 function EditModal({ onClose }: { onClose: () => void }) {
   const { profile, setProfile } = useProfile();
@@ -489,7 +849,7 @@ function EditModal({ onClose }: { onClose: () => void }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const { profile, sessions, removeSession, profileComplete, setProfile } = useProfile();
-  const [activeTab,  setActiveTab]  = useState<"performance"|"progress"|"explore"|"settings">("performance");
+  const [activeTab,  setActiveTab]  = useState<string>("performance");
   const [editOpen,   setEditOpen]   = useState(false);
   const [pinnedIds,  setPinnedIds]  = useState<string[]>([]);
   const [compareIds, setCompareIds] = useState<string[]>([]);
@@ -497,6 +857,9 @@ export default function ProfilePage() {
   const [showAllInsights, setShowAllInsights] = useState(false);
   const [isDark,     setIsDark]     = useState(true);
   const [meOpen,     setMeOpen]     = useState(false);
+  const [watchlist,  setWatchlist]  = useState<string[]>([]);
+  const [activeMsgConvId, setActiveMsgConvId] = useState<string | null>(null);
+  const [msgOpenWithAthlete, setMsgOpenWithAthlete] = useState<string | null>(null);
   const router = useRouter();
 
   // Auth guard + default to light mode
@@ -513,7 +876,34 @@ export default function ProfilePage() {
     }
     const pins = localStorage.getItem("kickiq_pinned");
     if (pins) setPinnedIds(JSON.parse(pins));
+    const wl = localStorage.getItem("kickiq_watchlist");
+    if (wl) setWatchlist(JSON.parse(wl));
   }, []);
+
+  // When recruiter mode activates, default to scout-board tab
+  useEffect(() => {
+    if ((profile as any).accountType === "recruiter") {
+      setActiveTab(prev => (["performance","progress","explore"].includes(prev) ? "scout-board" : prev));
+    } else {
+      setActiveTab(prev => (["scout-board","watchlist","messages-rec"].includes(prev) ? "performance" : prev));
+    }
+  }, [(profile as any).accountType]);
+
+  function toggleWatchlist(id: string) {
+    setWatchlist(prev => {
+      const next = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
+      try { localStorage.setItem("kickiq_watchlist", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  function openMessageWith(athleteId: string) {
+    setMsgOpenWithAthlete(null);  // reset first so effect re-fires if same athlete clicked again
+    setTimeout(() => {
+      setMsgOpenWithAthlete(athleteId);
+      setActiveTab("messages-rec");
+    }, 0);
+  }
 
   function toggleTheme() {
     const next = !isDark;
@@ -623,15 +1013,20 @@ export default function ProfilePage() {
               {/* Dropdown panel */}
               {meOpen && (
                 <div
-                  style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: 180, background: isDark ? "#1A2420" : "white", border: `1px solid ${border}`, borderRadius: 14, boxShadow: "0 12px 40px rgba(0,0,0,0.18)", overflow: "hidden", zIndex: 100 }}
+                  style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: 190, background: isDark ? "#1A2420" : "white", border: `1px solid ${border}`, borderRadius: 14, boxShadow: "0 12px 40px rgba(0,0,0,0.18)", overflow: "hidden", zIndex: 100 }}
                   onMouseLeave={() => setMeOpen(false)}
                 >
-                  {([
+                  {(isRecruiter ? [
+                    { id: "scout-board",  label: "Scout Board",  icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> },
+                    { id: "watchlist",    label: "Watchlist",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
+                    { id: "messages-rec", label: "Messages",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+                    { id: "settings-rec", label: "Settings",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
+                  ] : [
                     { id: "performance", label: "Performance", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> },
                     { id: "progress",    label: "Progress",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
                     { id: "explore",     label: "Explore",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> },
                     { id: "settings",    label: "Profile",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
-                  ] as const).map((t, i) => (
+                  ]).map((t, i) => (
                     <button
                       key={t.id}
                       onClick={() => { setActiveTab(t.id); setMeOpen(false); }}
@@ -1032,6 +1427,246 @@ export default function ProfilePage() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── RECRUITER: SCOUT BOARD TAB ── */}
+          {activeTab === "scout-board" && isRecruiter && (
+            <div>
+              {/* Recruiter header strip */}
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "16px 20px", background: card, border: `1px solid ${border}`, borderRadius: 14 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 22, color: "white" }}>{(profile.name || "R")[0].toUpperCase()}</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{profile.name || "Recruiter"}</p>
+                    <span style={{ fontSize: 10, fontWeight: 800, background: "rgba(13,148,136,0.12)", color: "#0D9488", border: "1px solid rgba(13,148,136,0.25)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      {(profile as any).recruiterRole || "Scout"}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 11, color: text2, marginTop: 2 }}>{(profile as any).organization || profile.currentClub || "Independent Scout"}</p>
+                </div>
+                <div style={{ display: "flex", gap: 20, flexShrink: 0, borderLeft: `1px solid ${border}`, paddingLeft: 20 }}>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "#10B981", lineHeight: 1 }}>{watchlist.length}</p>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Watching</p>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{MOCK_ATHLETES.length}</p>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Athletes</p>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{sessions.length}</p>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Reviewed</p>
+                  </div>
+                </div>
+              </div>
+
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 6 }}>Scout Board</p>
+              <p style={{ color: text2, fontSize: 13, marginBottom: 20 }}>Browse athlete profiles. Watch or message any prospect.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+                {MOCK_ATHLETES.map(athlete => {
+                  const inWatch = watchlist.includes(athlete.id);
+                  return (
+                    <div key={athlete.id} style={{ background: card, border: `1px solid ${inWatch ? "rgba(5,150,105,0.4)" : border}`, borderRadius: 16, padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12, boxShadow: inWatch ? "0 0 0 2px rgba(5,150,105,0.15)" : "none", transition: "all 0.15s" }}>
+                      {/* Avatar + position badge */}
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ position: "relative", flexShrink: 0 }}>
+                          <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <span style={{ color: "white", fontWeight: 900, fontSize: 20, fontFamily: "var(--font-display)" }}>{athlete.photoInitial}</span>
+                          </div>
+                          {inWatch && <div style={{ position: "absolute", bottom: -2, right: -2, width: 16, height: 16, borderRadius: "50%", background: "#059669", border: "2px solid " + bg, display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontWeight: 800, fontSize: 15, color: text1, marginBottom: 2 }}>{athlete.name}</p>
+                          <p style={{ fontSize: 11, color: text2 }}>{athlete.age} · {athlete.club}</p>
+                          <p style={{ fontSize: 11, color: text2 }}>{athlete.location}</p>
+                        </div>
+                        <span style={{ fontSize: 9, fontWeight: 800, background: "rgba(5,150,105,0.1)", color: "#10B981", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 100, padding: "2px 7px", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>{athlete.position}</span>
+                      </div>
+                      {/* Stats */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                        <div style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(5,150,105,0.04)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <p style={{ fontSize: 9, color: text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Speed</p>
+                          <p style={{ fontSize: 14, fontWeight: 800, color: "#10B981" }}>{athlete.peakSpeedMs}</p>
+                          <p style={{ fontSize: 8, color: text2 }}>m/s</p>
+                        </div>
+                        <div style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(5,150,105,0.04)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <p style={{ fontSize: 9, color: text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Symmetry</p>
+                          <p style={{ fontSize: 14, fontWeight: 800, color: "#06B6D4" }}>{athlete.symmetryScore}%</p>
+                          <p style={{ fontSize: 8, color: text2 }}>balance</p>
+                        </div>
+                        <div style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(5,150,105,0.04)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <p style={{ fontSize: 9, color: text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Risk</p>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: riskColor(athlete.overallRisk) }}>{athlete.overallRisk === "low" ? "Low" : athlete.overallRisk === "moderate" ? "Mod" : "High"}</span>
+                        </div>
+                      </div>
+                      {/* Action buttons */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <button
+                          onClick={() => toggleWatchlist(athlete.id)}
+                          style={{ padding: "9px 0", borderRadius: 10, border: `1px solid ${inWatch ? "rgba(5,150,105,0.4)" : border}`, background: inWatch ? "rgba(5,150,105,0.12)" : "transparent", color: inWatch ? "#10B981" : text2, fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill={inWatch ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                          {inWatch ? "Watching" : "Watch"}
+                        </button>
+                        <button
+                          onClick={() => openMessageWith(athlete.id)}
+                          style={{ padding: "9px 0", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                          Message
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── RECRUITER: WATCHLIST TAB ── */}
+          {activeTab === "watchlist" && isRecruiter && (
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 6 }}>Watchlist</p>
+              <p style={{ color: text2, fontSize: 13, marginBottom: 20 }}>Athletes you are actively monitoring.</p>
+              {watchlist.length === 0 ? (
+                <div style={{ padding: "80px 24px", textAlign: "center", background: card, border: `1px solid ${border}`, borderRadius: 18 }}>
+                  <div style={{ width: 64, height: 64, borderRadius: "50%", background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", border: `2px dashed ${isDark ? "rgba(5,150,105,0.3)" : "#A7F3D0"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </div>
+                  <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 8 }}>Your watchlist is empty</p>
+                  <p style={{ color: text2, fontSize: 14, marginBottom: 20 }}>Go to Scout Board and hit "Watch" on promising athletes.</p>
+                  <button onClick={() => setActiveTab("scout-board")} style={{ padding: "12px 28px", borderRadius: 12, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 14, border: "none", cursor: "pointer" }}>Open Scout Board →</button>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+                  {MOCK_ATHLETES.filter(a => watchlist.includes(a.id)).map(athlete => (
+                    <div key={athlete.id} style={{ background: card, border: `1px solid rgba(5,150,105,0.3)`, borderRadius: 16, padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 46, height: 46, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <span style={{ color: "white", fontWeight: 900, fontSize: 18, fontFamily: "var(--font-display)" }}>{athlete.photoInitial}</span>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <p style={{ fontWeight: 800, fontSize: 14, color: text1 }}>{athlete.name}</p>
+                          <p style={{ fontSize: 11, color: text2 }}>{athlete.position} · {athlete.club}</p>
+                        </div>
+                        <button onClick={() => toggleWatchlist(athlete.id)} style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(5,150,105,0.12)", border: "1px solid rgba(5,150,105,0.3)", cursor: "pointer", color: "#10B981", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>{athlete.peakSpeedMs} m/s</span>
+                        <span style={{ fontSize: 11, color: text2 }}>·</span>
+                        <span style={{ fontSize: 11, color: text2 }}>{athlete.symmetryScore}% sym</span>
+                        <span style={{ fontSize: 11, color: text2 }}>·</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: riskColor(athlete.overallRisk) }}>{athlete.overallRisk} risk</span>
+                      </div>
+                      <button onClick={() => openMessageWith(athlete.id)} style={{ padding: "8px 0", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Message →</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── RECRUITER: MESSAGES TAB ── */}
+          {activeTab === "messages-rec" && isRecruiter && (
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 20 }}>Messages</p>
+              <MessagingPanel
+                isDark={isDark} bg={bg} card={card} border={border} text1={text1} text2={text2}
+                activeMsgConvId={activeMsgConvId}
+                setActiveMsgConvId={setActiveMsgConvId}
+                openWithAthleteId={msgOpenWithAthlete}
+                isRecruiter={true}
+              />
+            </div>
+          )}
+
+          {/* ── RECRUITER: SETTINGS TAB ── */}
+          {activeTab === "settings-rec" && isRecruiter && (
+            <div style={{ maxWidth: 560, margin: "0 auto" }}>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 28, color: text1, marginBottom: 24 }}>Recruiter Settings</p>
+
+              {/* Identity */}
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: "20px 24px", marginBottom: 14 }}>
+                <p style={{ fontWeight: 700, fontSize: 15, color: text1, marginBottom: 16 }}>Identity</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {[
+                    { label: "Full Name", key: "name", placeholder: "Your name" },
+                    { label: "Email", key: "email", placeholder: "your@email.com" },
+                    { label: "Organization / Club", key: "organization", placeholder: "FC United Scouting" },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: text2, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</label>
+                      <input
+                        value={f.key === "name" || f.key === "email" ? (profile[f.key as keyof typeof profile] as string) || "" : (profile as any)[f.key] || ""}
+                        onChange={e => setProfile({ [f.key]: e.target.value } as any)}
+                        placeholder={f.placeholder}
+                        style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.04)", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, color: text1, outline: "none", fontFamily: "inherit", boxSizing: "border-box" }}
+                      />
+                    </div>
+                  ))}
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: text2, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>Role</label>
+                    <select
+                      value={(profile as any).recruiterRole || "Scout"}
+                      onChange={e => setProfile({ recruiterRole: e.target.value } as any)}
+                      style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.04)", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, color: text1, outline: "none", fontFamily: "inherit", cursor: "pointer", boxSizing: "border-box" }}
+                    >
+                      {["Scout","Head Coach","Analyst","Director of Recruitment"].map(r => <option key={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: text2, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>Bio / Scouting Focus</label>
+                    <textarea
+                      value={profile.bio || ""}
+                      onChange={e => setProfile({ bio: e.target.value })}
+                      rows={3}
+                      placeholder="Describe your scouting focus and methodology..."
+                      style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.04)", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, color: text1, outline: "none", fontFamily: "inherit", resize: "none", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Account type switcher */}
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: "18px 24px", marginBottom: 14 }}>
+                <p style={{ fontWeight: 700, fontSize: 15, color: text1, marginBottom: 4 }}>Account Type</p>
+                <p style={{ fontSize: 12, color: text2, marginBottom: 14 }}>Switch back to Athlete mode to upload and track sessions.</p>
+                <button onClick={() => setProfile({ accountType: "athlete" } as any)} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  Switch to Athlete Mode
+                </button>
+              </div>
+
+              {/* Danger zone */}
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: "18px 24px" }}>
+                <p style={{ fontWeight: 700, fontSize: 13, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>Account</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <button onClick={() => { sessionStorage.removeItem(AUTHED_KEY); window.location.href = "/login"; }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+                    Log out
+                  </button>
+                  <button onClick={() => { if (confirm("Delete your account? This cannot be undone.")) { localStorage.removeItem("kaori_profile"); localStorage.removeItem("kaori_sessions"); window.location.href = "/"; } }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+                    Delete Account
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── ATHLETE: MESSAGES TAB (for athlete accounts) ── */}
+          {activeTab === "messages" && !isRecruiter && (
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 20 }}>Messages</p>
+              <MessagingPanel
+                isDark={isDark} bg={bg} card={card} border={border} text1={text1} text2={text2}
+                activeMsgConvId={activeMsgConvId}
+                setActiveMsgConvId={setActiveMsgConvId}
+                openWithAthleteId={null}
+                isRecruiter={false}
+              />
             </div>
           )}
         </div>
