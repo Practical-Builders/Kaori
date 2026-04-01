@@ -729,17 +729,24 @@ export default function ProfilePage() {
                     {/* Below-hero metric strip */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
                       {[
-                        { icon: "sprint", label: "Max Sprint Acceleration", value: sessions[0].peakSpeedMs ? `${sessions[0].peakSpeedMs.toFixed(2)} m/s²` : "—" },
-                        { icon: "agility", label: "Quickest Lat. Agility", value: sessions[0].highlights?.find(h => h.label.toLowerCase().includes("turn") || h.label.toLowerCase().includes("lateral"))?.value ?? sessions[0].highlights?.[1]?.value ?? "—" },
+                        { icon: "sprint", label: "Max Sprint Speed", value: sessions[0].peakSpeedMs ? `${sessions[0].peakSpeedMs.toFixed(2)} m/s` : "—" },
+                        (() => {
+                          const turnHighlight = sessions[0].highlights?.find(h => h.label.toLowerCase().includes("turn"));
+                          const rawVal = turnHighlight?.value ?? null;
+                          const numVal = rawVal ? parseFloat(rawVal) : null;
+                          const isHighOutlier = numVal !== null && numVal > 12;
+                          return { icon: "agility", label: "Quickest Turn", value: rawVal ?? "—", subLabel: "lat. acceleration", outlier: isHighOutlier };
+                        })(),
                       ].map(m => (
                         <div key={m.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 }}>
                           <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(5,150,105,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                             {m.icon === "sprint" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-8 3 3 2-5"/><path d="M6 20h4"/><path d="M15 20h3"/></svg>}
                             {m.icon === "agility" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/><path d="m15 8 4 4-4 4"/></svg>}
                           </div>
-                          <div>
+                          <div style={{ minWidth: 0 }}>
                             <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{m.label}:</p>
-                            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{m.value}</p>
+                            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1, whiteSpace: "nowrap" }}>{m.value}{(m as any).outlier && <span style={{ fontSize: 9, fontWeight: 600, color: "#F59E0B", marginLeft: 4 }}>est.</span>}</p>
+                            {(m as any).subLabel && <p style={{ fontSize: 9, color: text2, marginTop: 1 }}>{(m as any).subLabel}</p>}
                           </div>
                         </div>
                       ))}
@@ -766,6 +773,31 @@ export default function ProfilePage() {
                                 <p style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h.label}</p>
                               </div>
                               {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 32, color: text1, lineHeight: 1, marginBottom: 6 }}>{h.value}</p>}
+                              {h.label === "Peak Stride Power" && (() => {
+                                const nm = parseFloat(h.value) || 0;
+                                const age = parseInt(profile.age || "20");
+                                const ht  = parseFloat((profile as any).heightCm || "170");
+                                const wt  = parseFloat((profile as any).weightKg || "70");
+                                const ageFactor = age < 10 ? 0.50 : age < 14 ? 0.65 : age < 18 ? 0.80 : age < 35 ? 1.0 : 0.90;
+                                const refMax = 130 * ageFactor * (ht / 170) * (wt / 70);
+                                const ratio  = Math.min(1, Math.max(0, nm / refMax));
+                                const bandLabel = ratio < 0.3 ? "Light" : ratio < 0.55 ? "Moderate" : ratio < 0.8 ? "Strong" : "Max Power";
+                                const bandColor = ratio < 0.3 ? "#10B981" : ratio < 0.55 ? "#F59E0B" : ratio < 0.8 ? "#F97316" : "#EF4444";
+                                return (
+                                  <div style={{ marginBottom: 8 }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                                      <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Light</span>
+                                      <span style={{ fontSize: 9, fontWeight: 700, color: bandColor, textTransform: "uppercase", letterSpacing: "0.06em" }}>{bandLabel}</span>
+                                      <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Max</span>
+                                    </div>
+                                    <div style={{ height: 7, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)", overflow: "hidden", position: "relative" }}>
+                                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, #10B981 0%, #F59E0B 45%, #F97316 70%, #EF4444 100%)", opacity: 0.2, borderRadius: 4 }} />
+                                      <div style={{ height: "100%", width: `${ratio * 100}%`, borderRadius: 4, background: "linear-gradient(90deg, #10B981 0%, #F59E0B 45%, #F97316 70%, #EF4444 100%)", backgroundSize: `${(1 / Math.max(ratio, 0.01)) * 100}% 100%`, transition: "width 0.5s ease" }} />
+                                    </div>
+                                    <p style={{ fontSize: 9, color: text2, marginTop: 4 }}>vs. your age & size profile</p>
+                                  </div>
+                                );
+                              })()}
                               <p style={{ fontSize: 11, color: text2 }}>at {h.timestamp_s.toFixed(1)}s · {h.sessionName}</p>
                             </div>
                           );
