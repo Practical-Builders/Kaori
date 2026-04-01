@@ -496,6 +496,7 @@ export default function ProfilePage() {
   const [compareOpen, setCompareOpen] = useState(false);
   const [showAllInsights, setShowAllInsights] = useState(false);
   const [isDark,     setIsDark]     = useState(true);
+  const [meOpen,     setMeOpen]     = useState(false);
   const router = useRouter();
 
   // Auth guard + default to light mode
@@ -583,31 +584,14 @@ export default function ProfilePage() {
 
       {/* ── NAV ── */}
       <nav style={{ position: "sticky", top: 0, zIndex: 40, background: isDark ? "rgba(10,15,13,0.92)" : "rgba(244,251,248,0.92)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${border}` }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 24px", height: 60, display: "flex", alignItems: "center", gap: 0 }}>
-          {/* Logo → always goes to dashboard */}
-          <Link href="/profile" style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 32, textDecoration: "none" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 24px", height: 60, display: "flex", alignItems: "center" }}>
+          {/* Logo */}
+          <Link href="/profile" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", marginRight: "auto" }}>
             <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: "white", fontWeight: 900, fontSize: 13, fontFamily: "var(--font-display)" }}>K</span>
             </div>
             <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, letterSpacing: "0.1em" }}>KICKIQ</span>
           </Link>
-
-          {/* Tabs */}
-          <div style={{ display: "flex", flex: 1, gap: 0 }}>
-            {([
-              { id: "performance", label: "Performance" },
-              { id: "progress",    label: "Progress"    },
-              { id: "explore",     label: "Explore"     },
-              { id: "settings",    label: "Profile"     },
-            ] as const).map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-                padding: "0 18px", height: 60, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                background: "none", border: "none", transition: "all 0.15s",
-                color: activeTab === t.id ? "#10B981" : text2,
-                borderBottom: activeTab === t.id ? "2px solid #059669" : "2px solid transparent",
-              }}>{t.label}</button>
-            ))}
-          </div>
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -618,6 +602,49 @@ export default function ProfilePage() {
                 ? <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>Light</>
                 : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>Dark</>}
             </button>
+
+            {/* Me dropdown */}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setMeOpen(v => !v)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px 6px 8px", borderRadius: 20, cursor: "pointer", background: meOpen ? (isDark ? "rgba(5,150,105,0.15)" : "#E6F9F2") : (isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.08)"), border: `1px solid ${meOpen ? "rgba(5,150,105,0.4)" : border}`, color: text1, fontSize: 13, fontWeight: 700, transition: "all 0.15s" }}
+              >
+                {/* Avatar */}
+                <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                  {profile.photoUrl
+                    ? <img src={profile.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <span style={{ color: "white", fontWeight: 800, fontSize: 11, fontFamily: "var(--font-display)" }}>{(profile.name || "M")[0].toUpperCase()}</span>
+                  }
+                </div>
+                Me
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transition: "transform 0.15s", transform: meOpen ? "rotate(180deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+
+              {/* Dropdown panel */}
+              {meOpen && (
+                <div
+                  style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: 180, background: isDark ? "#1A2420" : "white", border: `1px solid ${border}`, borderRadius: 14, boxShadow: "0 12px 40px rgba(0,0,0,0.18)", overflow: "hidden", zIndex: 100 }}
+                  onMouseLeave={() => setMeOpen(false)}
+                >
+                  {([
+                    { id: "performance", label: "Performance", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> },
+                    { id: "progress",    label: "Progress",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+                    { id: "explore",     label: "Explore",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> },
+                    { id: "settings",    label: "Profile",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+                  ] as const).map((t, i) => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setActiveTab(t.id); setMeOpen(false); }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 16px", background: activeTab === t.id ? (isDark ? "rgba(5,150,105,0.12)" : "#F0FDF9") : "none", border: "none", borderTop: i > 0 ? `1px solid ${border}` : "none", cursor: "pointer", color: activeTab === t.id ? "#10B981" : text1, fontSize: 13, fontWeight: activeTab === t.id ? 700 : 500, textAlign: "left", transition: "background 0.12s" }}
+                    >
+                      <span style={{ opacity: activeTab === t.id ? 1 : 0.45, color: activeTab === t.id ? "#10B981" : "currentColor" }}>{t.icon}</span>
+                      {t.label}
+                      {activeTab === t.id && <span style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "#10B981" }} />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </nav>
