@@ -66,6 +66,11 @@ export default function AnalyzePage() {
   const [markerPct,     setMarkerPct]     = useState<number | null>(null);
   const [pickMode,      setPickMode]      = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(true);
+  const [customThumb,   setCustomThumb]   = useState<string | undefined>(undefined);
+  const [settingThumb,  setSettingThumb]  = useState(false);
+  // Smoothed athlete position (for drift compensation)
+  const smoothX = useRef<number | null>(null);
+  const smoothY = useRef<number | null>(null);
   const [result,        setResult]        = useState<AnalysisSession | null>(null);
   const [summaryOpen,   setSummaryOpen]   = useState(false);
   const [movesOpen,     setMovesOpen]     = useState(false);
@@ -133,50 +138,62 @@ export default function AnalyzePage() {
     const canvas = canvasRef.current;
     const video  = videoRef.current;
     if (!canvas || !video) { animRef.current = requestAnimationFrame(drawOverlay); return; }
-    canvas.width  = video.offsetWidth;
-    canvas.height = video.offsetHeight;
+    // Match actual rendered video box (letterboxing aware)
+    const vw = video.offsetWidth;
+    const vh = video.offsetHeight;
+    if (canvas.width !== vw) canvas.width = vw;
+    if (canvas.height !== vh) canvas.height = vh;
     const ctx = canvas.getContext("2d");
     if (!ctx) { animRef.current = requestAnimationFrame(drawOverlay); return; }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (markerPct === null) { animRef.current = requestAnimationFrame(drawOverlay); return; }
 
-    // Athlete position
-    const cx = (markerPct / 100) * canvas.width;
-    const markerY = targetY !== null ? targetY * canvas.height : canvas.height * 0.55;
-    const cy = markerY;
+    // ── Velocity-compensated position (smooth tracking, no drift) ──────────────
+    // Raw selected position
+    const rawX = (markerPct / 100) * canvas.width;
+    const rawY = targetY !== null ? targetY * canvas.height : canvas.height * 0.55;
 
-    // Get current speed from kinematics
-    let currentSpeed = 0;
+    // Get current speed to estimate how far athlete may have moved
     const sess = result;
+    let currentSpeed = 0;
+    let frameIdx = 0;
     if (sess?.kinematics?.timestamp_ms && sess.kinematics.ankle_speed_ms) {
       const tMs = video.currentTime * 1000;
-      let closest = 0; let minDiff = Infinity;
+      let minDiff = Infinity;
       (sess.kinematics.timestamp_ms as number[]).forEach((t, i) => {
-        const d = Math.abs(t - tMs); if (d < minDiff) { minDiff = d; closest = i; }
+        const d = Math.abs(t - tMs); if (d < minDiff) { minDiff = d; frameIdx = i; }
       });
-      currentSpeed = (sess.kinematics.ankle_speed_ms as number[])[closest] ?? 0;
+      currentSpeed = (sess.kinematics.ankle_speed_ms as number[])[frameIdx] ?? 0;
     } else if (sess?.peakSpeedMs) {
       currentSpeed = sess.peakSpeedMs * 0.85;
     }
+
+    // Lerp smoothing factor: slower at high speed (more confident position)
+    // At 0 m/s → α=0.08 (very smooth), at 10 m/s → α=0.18 (more responsive)
+    const alpha = Math.min(0.08 + currentSpeed * 0.01, 0.22);
+    smoothX.current = smoothX.current === null ? rawX : smoothX.current + alpha * (rawX - smoothX.current);
+    smoothY.current = smoothY.current === null ? rawY : smoothY.current + alpha * (rawY - smoothY.current);
+    const cx = smoothX.current;
+    const cy = smoothY.current;
 
     const color = currentSpeed >= 7.5 ? "#F97316" : currentSpeed >= 6 ? "#FBBF24" : "#10B981";
     const now   = Date.now();
     const pulse = (Math.sin(now * 0.004) + 1) / 2;
 
-    // Skeleton (scale ~1/5 of canvas height)
+    // Skeleton (scale proportional to video height)
     const skeletonScale = canvas.height * 0.18;
     drawSkeleton(ctx, cx, cy - skeletonScale * 0.1, skeletonScale, color, now);
 
-    // Pulsing tracking ring at feet
+    // Pulsing ellipse at feet (perspective shadow)
     const feetY = cy + skeletonScale * 0.88;
     const ringR = 18 + pulse * 6;
-    ctx.beginPath(); ctx.ellipse(cx, feetY, ringR, ringR * 0.35, 0, 0, Math.PI * 2);
+    ctx.beginPath(); ctx.ellipse(cx, feetY, ringR, ringR * 0.32, 0, 0, Math.PI * 2);
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.25 + pulse * 0.45; ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // Speed HUD badge
-    const hudY = cy - skeletonScale * 1.28;
+    // Speed HUD badge above head
+    const hudY = cy - skeletonScale * 1.32;
     const speedTxt = currentSpeed > 0 ? `${currentSpeed.toFixed(2)} m/s` : sess?.peakSpeedMs ? `${sess.peakSpeedMs.toFixed(2)} m/s` : "— m/s";
     const badgeW = 84; const badgeH = 26;
     ctx.fillStyle = "rgba(0,0,0,0.72)";
@@ -184,7 +201,6 @@ export default function AnalyzePage() {
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.fillStyle = color; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(speedTxt, cx, hudY);
-    // Connector
     ctx.beginPath(); ctx.moveTo(cx, hudY + badgeH / 2); ctx.lineTo(cx, cy - skeletonScale * 1.12 - 8);
     ctx.strokeStyle = `${color}55`; ctx.lineWidth = 1; ctx.stroke();
 
@@ -203,8 +219,8 @@ export default function AnalyzePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlayEnabled, markerPct, result]);
 
-  // ── Capture thumbnail ──────────────────────────────────────────────────────
-  function captureThumbnail(): string | undefined {
+  // ── Capture thumbnail from current video frame ─────────────────────────────
+  function captureFrame(): string | undefined {
     const v = videoRef.current;
     if (!v || v.readyState < 2) return undefined;
     try {
@@ -215,9 +231,18 @@ export default function AnalyzePage() {
       if (!ctx) return undefined;
       ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
       return canvas.toDataURL("image/jpeg", 0.75);
-    } catch {
-      return undefined;
-    }
+    } catch { return undefined; }
+  }
+
+  function handleSetThumbnail() {
+    videoRef.current?.pause();
+    const frame = captureFrame();
+    if (frame) setCustomThumb(frame);
+    setSettingThumb(false);
+  }
+
+  function captureThumbnail(): string | undefined {
+    return customThumb ?? captureFrame();
   }
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
 
@@ -257,6 +282,9 @@ export default function AnalyzePage() {
     setTargetX(x);
     setTargetY(y);
     setMarkerPct(x * 100);
+    // Reset smooth tracking so it snaps to the new pick point immediately
+    smoothX.current = null;
+    smoothY.current = null;
     setPickMode(false);
     videoRef.current?.pause();
   }
@@ -586,6 +614,20 @@ export default function AnalyzePage() {
                     </div>
                   </div>
 
+                  {/* Row 1b: Set Thumbnail */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {customThumb && (
+                      <img src={customThumb} alt="thumb" style={{ width: 40, height: 28, objectFit: "cover", borderRadius: 5, border: "1px solid rgba(16,185,129,0.4)", flexShrink: 0 }} />
+                    )}
+                    <button type="button" onClick={handleSetThumbnail}
+                      style={{ flex: 1, padding: "8px 12px", borderRadius: 9, border: `1px solid ${customThumb ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.08)"}`, background: customThumb ? "rgba(16,185,129,0.07)" : "rgba(255,255,255,0.03)", color: customThumb ? "#34D399" : "rgba(255,255,255,0.35)", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>
+                      {customThumb ? "✓ Thumbnail set — click to update" : "📷  Set thumbnail from current frame"}
+                    </button>
+                    {customThumb && (
+                      <button type="button" onClick={() => setCustomThumb(undefined)} style={{ padding: "8px 10px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "rgba(255,255,255,0.2)", fontSize: 11, cursor: "pointer" }}>✕</button>
+                    )}
+                  </div>
+
                   {/* Row 2: Athlete selection */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button type="button"
@@ -625,41 +667,93 @@ export default function AnalyzePage() {
                 const f = e.target.files?.[0] ?? null;
                 setFile(f); setStatus("idle"); setResult(null);
                 setTargetX(null); setTargetY(null); setMarkerPct(null);
+                setCustomThumb(undefined); setSettingThumb(false);
+                smoothX.current = null; smoothY.current = null;
                 if (f) setClipName(f.name.replace(/\.[^.]+$/, ""));
               }} disabled={isProcessing} />
 
-            {/* ── Trim controls ── */}
-            {file && videoDuration > 0 && (
-              <div style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: "18px 20px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                  <p style={{ fontWeight: 700, color: "rgba(255,255,255,0.7)", fontSize: 14 }}>Trim Video</p>
-                  <span style={{ fontSize: 11, fontWeight: 700, background: "rgba(5,150,105,0.15)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "3px 10px" }}>{(trimEnd-trimStart).toFixed(1)}s selected</span>
-                </div>
-                <div style={{ position: "relative", height: 36, background: "rgba(255,255,255,0.05)", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", marginBottom: 14 }}>
-                  <div style={{ position: "absolute", top: 0, height: "100%", background: "rgba(5,150,105,0.2)", borderLeft: "2px solid #059669", borderRight: "2px solid #0D9488", left: `${(trimStart/videoDuration)*100}%`, width: `${((trimEnd-trimStart)/videoDuration)*100}%` }} />
-                  <div style={{ position: "absolute", bottom: 3, left: 0, right: 0, display: "flex", justifyContent: "space-between", padding: "0 6px" }}>
-                    {[0,.25,.5,.75,1].map(p => <span key={p} style={{ fontSize: 9, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>{(p*videoDuration).toFixed(0)}s</span>)}
-                  </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Start</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>{trimStart.toFixed(1)}s</span>
+            {/* ── Apple-style inline trim timeline ── */}
+            {file && videoDuration > 0 && (() => {
+              const startPct = (trimStart / videoDuration) * 100;
+              const endPct   = (trimEnd   / videoDuration) * 100;
+              const HANDLE   = 14; // handle width px
+
+              function onTrackPointer(e: React.PointerEvent<HTMLDivElement>, handle: "start" | "end") {
+                e.preventDefault();
+                const track = e.currentTarget.parentElement!;
+                const rect  = track.getBoundingClientRect();
+                const move  = (me: PointerEvent) => {
+                  const raw = Math.max(0, Math.min(1, (me.clientX - rect.left) / rect.width));
+                  const t   = raw * videoDuration;
+                  if (handle === "start") {
+                    const next = Math.min(t, trimEnd - 0.5);
+                    setTrimStart(next);
+                    if (videoRef.current) videoRef.current.currentTime = next;
+                  } else {
+                    const next = Math.max(t, trimStart + 0.5);
+                    setTrimEnd(next);
+                    if (videoRef.current) videoRef.current.currentTime = next;
+                  }
+                };
+                const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+                window.addEventListener("pointermove", move);
+                window.addEventListener("pointerup", up);
+              }
+
+              return (
+                <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: "16px 18px" }}>
+                  {/* Header */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <p style={{ fontWeight: 700, color: "rgba(255,255,255,0.6)", fontSize: 13 }}>Trim</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>{trimStart.toFixed(1)}s → {trimEnd.toFixed(1)}s</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, background: "rgba(5,150,105,0.15)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "2px 9px" }}>{(trimEnd - trimStart).toFixed(1)}s</span>
+                      <button type="button" onClick={() => { setTrimStart(0); setTrimEnd(videoDuration); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>Reset</button>
                     </div>
-                    <input type="range" min={0} max={videoDuration} step={0.1} value={trimStart} onChange={e => { const v = Math.min(parseFloat(e.target.value), trimEnd-0.5); setTrimStart(v); if (videoRef.current) videoRef.current.currentTime = v; }} style={{ width: "100%", accentColor: "#059669" }} />
                   </div>
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>End</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>{trimEnd.toFixed(1)}s</span>
+
+                  {/* Timeline track */}
+                  <div style={{ position: "relative", height: 44, userSelect: "none" }}>
+                    {/* Full track */}
+                    <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.05)", borderRadius: 10, overflow: "hidden" }}>
+                      {/* Time ticks */}
+                      {[0, 0.25, 0.5, 0.75, 1].map(p => (
+                        <span key={p} style={{ position: "absolute", bottom: 4, left: `${p * 100}%`, transform: "translateX(-50%)", fontSize: 8, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>{(p * videoDuration).toFixed(0)}s</span>
+                      ))}
                     </div>
-                    <input type="range" min={0} max={videoDuration} step={0.1} value={trimEnd} onChange={e => { const v = Math.max(parseFloat(e.target.value), trimStart+0.5); setTrimEnd(v); if (videoRef.current) videoRef.current.currentTime = v; }} style={{ width: "100%", accentColor: "#059669" }} />
+
+                    {/* Dimmed left */}
+                    <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${startPct}%`, background: "rgba(0,0,0,0.45)", borderRadius: "10px 0 0 10px" }} />
+                    {/* Selected region */}
+                    <div style={{ position: "absolute", top: 0, bottom: 0, left: `${startPct}%`, width: `${endPct - startPct}%`, background: "rgba(5,150,105,0.18)", borderTop: "2px solid #059669", borderBottom: "2px solid #059669" }} />
+                    {/* Dimmed right */}
+                    <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: `${100 - endPct}%`, background: "rgba(0,0,0,0.45)", borderRadius: "0 10px 10px 0" }} />
+
+                    {/* Start handle */}
+                    <div
+                      onPointerDown={e => onTrackPointer(e, "start")}
+                      style={{ position: "absolute", top: 0, bottom: 0, left: `${startPct}%`, width: HANDLE, transform: "translateX(-50%)", cursor: "ew-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+                      <div style={{ width: HANDLE, height: "100%", background: "#059669", borderRadius: "8px 0 0 8px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "2px 0 8px rgba(5,150,105,0.4)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+                          {[0,1,2].map(i => <div key={i} style={{ width: 2, height: 2, borderRadius: "50%", background: "rgba(255,255,255,0.7)" }} />)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* End handle */}
+                    <div
+                      onPointerDown={e => onTrackPointer(e, "end")}
+                      style={{ position: "absolute", top: 0, bottom: 0, left: `${endPct}%`, width: HANDLE, transform: "translateX(-50%)", cursor: "ew-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+                      <div style={{ width: HANDLE, height: "100%", background: "#0D9488", borderRadius: "0 8px 8px 0", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "-2px 0 8px rgba(13,148,136,0.4)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+                          {[0,1,2].map(i => <div key={i} style={{ width: 2, height: 2, borderRadius: "50%", background: "rgba(255,255,255,0.7)" }} />)}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <button type="button" onClick={() => { setTrimStart(0); setTrimEnd(videoDuration); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.2)", marginTop: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>Reset</button>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Progress */}
             {isProcessing && (

@@ -133,13 +133,6 @@ export default function Landing() {
                   }}>
                     Create Account
                   </Link>
-                  <Link href="/analyze" style={{
-                    display: "inline-block", padding: "16px 32px", borderRadius: 10,
-                    background: "rgba(255,255,255,0.08)", color: "white", fontWeight: 600, fontSize: 16,
-                    textDecoration: "none", border: "1px solid rgba(255,255,255,0.12)",
-                  }}>
-                    Try Without Account
-                  </Link>
                 </>
               )}
             </div>
@@ -238,13 +231,6 @@ export default function Landing() {
               textDecoration: "none",
             }}>
               Create Free Account
-            </Link>
-            <Link href="/analyze" style={{
-              display: "inline-block", padding: "16px 36px", borderRadius: 10,
-              background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 600, fontSize: 16,
-              textDecoration: "none", border: "1px solid rgba(255,255,255,0.12)",
-            }}>
-              Try Without Account
             </Link>
           </div>
         </div>

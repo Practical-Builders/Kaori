@@ -418,12 +418,6 @@ export default function LoginPage() {
               </button>
             </p>
 
-            <Link href="/analyze" style={{
-              marginTop: 12, fontSize: 12, color: "rgba(255,255,255,0.2)",
-              textDecoration: "none", textAlign: "center", display: "block",
-            }}>
-              Continue without account
-            </Link>
             </>)}
           </div>
         </div>
