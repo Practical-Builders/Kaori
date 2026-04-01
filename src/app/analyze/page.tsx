@@ -621,7 +621,7 @@ export default function AnalyzePage() {
                     )}
                     <button type="button" onClick={handleSetThumbnail}
                       style={{ flex: 1, padding: "8px 12px", borderRadius: 9, border: `1px solid ${customThumb ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.08)"}`, background: customThumb ? "rgba(16,185,129,0.07)" : "rgba(255,255,255,0.03)", color: customThumb ? "#34D399" : "rgba(255,255,255,0.35)", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>
-                      {customThumb ? "✓ Thumbnail set — click to update" : "📷  Set thumbnail from current frame"}
+                      {customThumb ? "Thumbnail set — click to update" : "Set thumbnail from current frame"}
                     </button>
                     {customThumb && (
                       <button type="button" onClick={() => setCustomThumb(undefined)} style={{ padding: "8px 10px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "rgba(255,255,255,0.2)", fontSize: 11, cursor: "pointer" }}>✕</button>

@@ -19,7 +19,7 @@ export default function Landing() {
         background: "rgba(10,15,13,0.85)", backdropFilter: "blur(16px)",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Link href={mounted && profileComplete ? "/profile" : "/"} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
             background: "linear-gradient(135deg, #059669, #0D9488)",
@@ -28,7 +28,7 @@ export default function Landing() {
             <span style={{ color: "white", fontWeight: 900, fontSize: 15, fontFamily: "var(--font-display)" }}>K</span>
           </div>
           <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: "white", letterSpacing: "0.12em" }}>KICKIQ</span>
-        </div>
+        </Link>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {mounted && profileComplete ? (
@@ -161,7 +161,7 @@ export default function Landing() {
                 step: "01",
                 title: "Upload Your Video",
                 desc: "Upload any training or match footage. Trim it to the clip you want analyzed. Supports MP4, MOV, and WebM.",
-                image: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=600&q=80",
+                image: "/step01.jpg",
               },
               {
                 step: "02",
@@ -173,7 +173,7 @@ export default function Landing() {
                 step: "03",
                 title: "Review Your Data",
                 desc: "Receive a factual biomechanical report covering peak speed, movement symmetry, injury risk flags, and training recommendations.",
-                image: "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=600&q=80",
+                image: "/step03.jpg",
               },
             ].map((item) => (
               <div key={item.step} style={{ background: "#141A17", overflow: "hidden" }}>

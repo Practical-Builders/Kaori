@@ -123,7 +123,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
         ].map(d => (
           <div key={d.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "18px 16px" }}>
             <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{d.label}</p>
-            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26, color: d.color, lineHeight: 1 }}>{d.value}</p>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: d.color, lineHeight: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.value}</p>
             <p style={{ fontSize: 11, color: text2, marginTop: 6 }}>{d.sub}</p>
           </div>
         ))}
@@ -325,7 +325,7 @@ function SessionCard({ session, onRemove, pinned, onPin, selected, onSelect }: {
           {session.overallRisk && <span style={{ fontSize: 10, fontWeight: 800, color: rc.color, background: `${rc.color}18`, border: `1px solid ${rc.color}40`, borderRadius: 20, padding: "3px 8px" }}>{rc.label}</span>}
           {/* Pin button */}
           <button onClick={e => { e.stopPropagation(); onPin(); }} style={{ width: 28, height: 28, borderRadius: "50%", background: pinned ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${pinned ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)"}`, cursor: "pointer", color: pinned ? "#FBBF24" : "rgba(255,255,255,0.25)", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            ★
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </button>
           <button onClick={e => { e.stopPropagation(); onRemove(); }} style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", color: "rgba(255,255,255,0.2)", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           <span style={{ color: open ? "#10B981" : "rgba(255,255,255,0.2)", fontSize: 12 }}>{open ? "▲" : "▼"}</span>
@@ -498,16 +498,17 @@ export default function ProfilePage() {
   const [isDark,     setIsDark]     = useState(true);
   const router = useRouter();
 
-  // Force dark on mount, auth guard
+  // Auth guard + default to light mode
   useEffect(() => {
     if (!sessionStorage.getItem(AUTHED_KEY)) { router.replace("/login"); return; }
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved === "light") {
-      document.documentElement.removeAttribute("data-theme");
-      setIsDark(false);
-    } else {
+    if (saved === "dark") {
       document.documentElement.setAttribute("data-theme", "dark");
       setIsDark(true);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      localStorage.setItem(THEME_KEY, "light");
+      setIsDark(false);
     }
     const pins = localStorage.getItem("kickiq_pinned");
     if (pins) setPinnedIds(JSON.parse(pins));
@@ -583,13 +584,13 @@ export default function ProfilePage() {
       {/* ── NAV ── */}
       <nav style={{ position: "sticky", top: 0, zIndex: 40, background: isDark ? "rgba(10,15,13,0.92)" : "rgba(244,251,248,0.92)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${border}` }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 24px", height: 60, display: "flex", alignItems: "center", gap: 0 }}>
-          {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 32 }}>
+          {/* Logo → always goes to dashboard */}
+          <Link href="/profile" style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 32, textDecoration: "none" }}>
             <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: "white", fontWeight: 900, fontSize: 13, fontFamily: "var(--font-display)" }}>K</span>
             </div>
             <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, letterSpacing: "0.1em" }}>KICKIQ</span>
-          </div>
+          </Link>
 
           {/* Tabs */}
           <div style={{ display: "flex", flex: 1, gap: 0 }}>
@@ -690,7 +691,7 @@ export default function ProfilePage() {
                       <div style={{ position: "absolute", top: 16, right: 16, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
                         {sessions[0].peakSpeedMs && (
                           <div style={{ background: "rgba(5,150,105,0.88)", backdropFilter: "blur(8px)", borderRadius: 8, padding: "6px 11px", display: "flex", alignItems: "center", gap: 5 }}>
-                            <span style={{ fontSize: 13 }}>⚡</span>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                             <span style={{ fontSize: 13, fontWeight: 800, color: "white", fontFamily: "var(--font-display)" }}>{sessions[0].peakSpeedMs.toFixed(2)} m/s</span>
                           </div>
                         )}
@@ -728,11 +729,14 @@ export default function ProfilePage() {
                     {/* Below-hero metric strip */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
                       {[
-                        { icon: "🚀", label: "Max Sprint Acceleration", value: sessions[0].peakSpeedMs ? `${sessions[0].peakSpeedMs.toFixed(2)} m/s²` : "—" },
-                        { icon: "🔄", label: "Quickest Lat. Agility", value: sessions[0].highlights?.find(h => h.label.toLowerCase().includes("turn") || h.label.toLowerCase().includes("lateral"))?.value ?? sessions[0].highlights?.[1]?.value ?? "—" },
+                        { icon: "sprint", label: "Max Sprint Acceleration", value: sessions[0].peakSpeedMs ? `${sessions[0].peakSpeedMs.toFixed(2)} m/s²` : "—" },
+                        { icon: "agility", label: "Quickest Lat. Agility", value: sessions[0].highlights?.find(h => h.label.toLowerCase().includes("turn") || h.label.toLowerCase().includes("lateral"))?.value ?? sessions[0].highlights?.[1]?.value ?? "—" },
                       ].map(m => (
                         <div key={m.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-                          <span style={{ fontSize: 22 }}>{m.icon}</span>
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(5,150,105,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {m.icon === "sprint" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-8 3 3 2-5"/><path d="M6 20h4"/><path d="M15 20h3"/></svg>}
+                            {m.icon === "agility" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/><path d="m15 8 4 4-4 4"/></svg>}
+                          </div>
                           <div>
                             <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{m.label}:</p>
                             <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{m.value}</p>
@@ -748,13 +752,17 @@ export default function ProfilePage() {
                       <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Top Moments</p>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
                         {topMoments.slice(0, 3).map((h, i) => {
-                          const meta = [{ icon: "⚡", color: "#10B981" }, { icon: "🚀", color: "#A78BFA" }, { icon: "🔄", color: "#06B6D4" }][i] ?? { icon: "📊", color: "#10B981" };
+                          const meta = [{ icon: "bolt", color: "#10B981" }, { icon: "sprint", color: "#A78BFA" }, { icon: "agility", color: "#06B6D4" }][i] ?? { icon: "bolt", color: "#10B981" };
                           return (
                             <div key={i} style={{ background: isDark ? "#141A17" : "white", border: `1px solid ${border}`, borderRadius: 16, padding: "20px 18px", position: "relative", overflow: "hidden" }}>
                               {/* glow behind */}
                               <div style={{ position: "absolute", top: -28, right: -28, width: 100, height: 100, borderRadius: "50%", background: `radial-gradient(circle, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
                               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${meta.color}18`, border: `1px solid ${meta.color}28`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{meta.icon}</div>
+                                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${meta.color}18`, border: `1px solid ${meta.color}28`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  {meta.icon === "bolt" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>}
+                                  {meta.icon === "sprint" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M13 4a1 1 0 1 0 2 0 1 1 0 0 0-2 0"/><path d="m7.5 14 2.5-6 3 3 2-3.5"/><path d="M5 20h14"/></svg>}
+                                  {meta.icon === "agility" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>}
+                                </div>
                                 <p style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h.label}</p>
                               </div>
                               {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 32, color: text1, lineHeight: 1, marginBottom: 6 }}>{h.value}</p>}
@@ -857,7 +865,7 @@ export default function ProfilePage() {
                                 <p style={{ fontSize: 10, color: text2 }}>{new Date(s.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}{s.peakTorqueNm ? ` · ${s.peakTorqueNm.toFixed(0)} Nm` : ""}</p>
                               </div>
                               <div style={{ display: "flex", gap: 4, marginLeft: 8, flexShrink: 0 }}>
-                                <button onClick={() => togglePin(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: pinnedIds.includes(s.id) ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${pinnedIds.includes(s.id) ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)"}`, cursor: "pointer", color: pinnedIds.includes(s.id) ? "#FBBF24" : "rgba(255,255,255,0.25)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>★</button>
+                                <button onClick={() => togglePin(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: pinnedIds.includes(s.id) ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${pinnedIds.includes(s.id) ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)"}`, cursor: "pointer", color: pinnedIds.includes(s.id) ? "#FBBF24" : "rgba(255,255,255,0.25)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
                                 <button onClick={() => removeSession(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", color: "rgba(255,255,255,0.2)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
                               </div>
                             </div>
