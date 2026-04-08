@@ -68,9 +68,14 @@ export default function AnalyzePage() {
   const [overlayEnabled, setOverlayEnabled] = useState(true);
   const [customThumb,   setCustomThumb]   = useState<string | undefined>(undefined);
   const [settingThumb,  setSettingThumb]  = useState(false);
-  // Smoothed athlete position (for drift compensation)
+  // Smoothed athlete position (fallback when no pose data)
   const smoothX = useRef<number | null>(null);
   const smoothY = useRef<number | null>(null);
+  // Raw per-frame pose data from backend (NOT persisted to localStorage)
+  const poseFramesRef = useRef<any[]>([]);
+  const poseMetaRef   = useRef<{ width: number; height: number }>({ width: 1, height: 1 });
+  // Motion trail: last N hip-midpoint positions in canvas coords
+  const trailRef = useRef<Array<{ x: number; y: number }>>([]);
   const [result,        setResult]        = useState<AnalysisSession | null>(null);
   const [summaryOpen,   setSummaryOpen]   = useState(false);
   const [movesOpen,     setMovesOpen]     = useState(false);
@@ -83,65 +88,120 @@ export default function AnalyzePage() {
   const animRef    = useRef<number>(0);
   const videoUrl   = useMemo(() => file ? URL.createObjectURL(file) : null, [file]);
 
-  // ── Canvas overlay drawing ──────────────────────────────────────────────────
-  function drawSkeleton(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, color: string, now: number) {
-    const sway = Math.sin(now * 0.0015) * scale * 0.04;
-    const joints: Record<string, [number, number]> = {
-      head:      [sway * 0.3,       -scale * 1.12],
-      neck:      [sway * 0.2,       -scale * 0.88],
-      lShoulder: [-scale * 0.28 + sway, -scale * 0.72],
-      rShoulder: [ scale * 0.28 + sway, -scale * 0.72],
-      lElbow:    [-scale * 0.40,    -scale * 0.40],
-      rElbow:    [ scale * 0.40,    -scale * 0.40],
-      lWrist:    [-scale * 0.34,    -scale * 0.10],
-      rWrist:    [ scale * 0.34,    -scale * 0.10],
-      lHip:      [-scale * 0.15,     0],
-      rHip:      [ scale * 0.15,     0],
-      lKnee:     [-scale * 0.18,     scale * 0.46],
-      rKnee:     [ scale * 0.18,     scale * 0.46],
-      lAnkle:    [-scale * 0.16,     scale * 0.88],
-      rAnkle:    [ scale * 0.16,     scale * 0.88],
-    };
-    const bones: [string, string][] = [
-      ["head","neck"],
+  // ── MediaPipe landmark indices we use for drawing ───────────────────────────
+  const LM_IDX: Record<string, number> = {
+    nose: 0, lShoulder: 11, rShoulder: 12,
+    lElbow: 13, rElbow: 14, lWrist: 15, rWrist: 16,
+    lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28,
+  };
+
+  /** Map a backend landmark (in original video pixel space) to canvas display coords.
+   *  Accounts for letterboxing when the video aspect ratio differs from the canvas. */
+  function lmToCanvas(lx: number, ly: number, cW: number, cH: number, vW: number, vH: number) {
+    const va = vW / vH, ca = cW / cH;
+    let rW: number, rH: number, ox: number, oy: number;
+    if (va > ca) { rW = cW; rH = cW / va; ox = 0;         oy = (cH - rH) / 2; }
+    else         { rH = cH; rW = cH * va; oy = 0;         ox = (cW - rW) / 2; }
+    return { x: ox + (lx / vW) * rW, y: oy + (ly / vH) * rH };
+  }
+
+  /** Build a canvas-space joints map from raw backend landmarks for the current frame. */
+  function getCanvasJoints(
+    lms: any[], cW: number, cH: number, vW: number, vH: number,
+  ): Record<string, { x: number; y: number }> | null {
+    if (!lms || lms.length < 29) return null;
+    const j: Record<string, { x: number; y: number }> = {};
+    for (const [name, idx] of Object.entries(LM_IDX)) {
+      const lm = lms[idx];
+      if (!lm || (lm.visibility ?? 1) < 0.12) continue;
+      j[name] = lmToCanvas(lm.x, lm.y, cW, cH, vW, vH);
+    }
+    // Require nose + at least one hip to consider the skeleton valid
+    if (!j.nose || (!j.lHip && !j.rHip)) return null;
+    // Synthetic neck = midpoint of shoulders (if both visible)
+    if (j.lShoulder && j.rShoulder)
+      j.neck = { x: (j.lShoulder.x + j.rShoulder.x) / 2, y: (j.lShoulder.y + j.rShoulder.y) / 2 };
+    return j;
+  }
+
+  // ── Real skeleton: draws using actual per-frame landmark positions ───────────
+  function drawSkeletonReal(ctx: CanvasRenderingContext2D, j: Record<string, { x: number; y: number }>, color: string) {
+    const BONES: [string, string][] = [
+      ["nose","neck"],
       ["neck","lShoulder"],["neck","rShoulder"],
-      ["neck","lHip"],["neck","rHip"],
       ["lShoulder","lElbow"],["lElbow","lWrist"],
       ["rShoulder","rElbow"],["rElbow","rWrist"],
+      ["neck","lHip"],["neck","rHip"],
       ["lHip","rHip"],
       ["lHip","lKnee"],["lKnee","lAnkle"],
       ["rHip","rKnee"],["rKnee","rAnkle"],
     ];
-    // Glow pass
-    ctx.shadowColor = color;
-    ctx.shadowBlur  = 6;
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = 2;
-    ctx.globalAlpha = 0.85;
+    ctx.shadowColor = color; ctx.shadowBlur = 8;
+    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.92;
+    BONES.forEach(([a, b]) => {
+      if (!j[a] || !j[b]) return;
+      ctx.beginPath(); ctx.moveTo(j[a].x, j[a].y); ctx.lineTo(j[b].x, j[b].y); ctx.stroke();
+    });
+    ctx.shadowBlur = 0;
+    Object.entries(j).forEach(([name, pos]) => {
+      if (name === "neck") return; // synthetic — don't draw a dot
+      const r = name === "nose" ? 7 : 4;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = name === "nose" ? "rgba(255,255,255,0.95)" : color; ctx.fill();
+    });
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  }
+
+  // ── Synthetic skeleton fallback (used when no pose data is available) ────────
+  function drawSkeletonSynthetic(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, color: string, now: number) {
+    const sway = Math.sin(now * 0.0015) * scale * 0.04;
+    const joints: Record<string, [number, number]> = {
+      head:      [sway * 0.3,            -scale * 1.12],
+      neck:      [sway * 0.2,            -scale * 0.88],
+      lShoulder: [-scale * 0.28 + sway,  -scale * 0.72],
+      rShoulder: [ scale * 0.28 + sway,  -scale * 0.72],
+      lElbow:    [-scale * 0.40,         -scale * 0.40],
+      rElbow:    [ scale * 0.40,         -scale * 0.40],
+      lWrist:    [-scale * 0.34,         -scale * 0.10],
+      rWrist:    [ scale * 0.34,         -scale * 0.10],
+      lHip:      [-scale * 0.15,          0],
+      rHip:      [ scale * 0.15,          0],
+      lKnee:     [-scale * 0.18,          scale * 0.46],
+      rKnee:     [ scale * 0.18,          scale * 0.46],
+      lAnkle:    [-scale * 0.16,          scale * 0.88],
+      rAnkle:    [ scale * 0.16,          scale * 0.88],
+    };
+    const bones: [string, string][] = [
+      ["head","neck"],["neck","lShoulder"],["neck","rShoulder"],
+      ["neck","lHip"],["neck","rHip"],
+      ["lShoulder","lElbow"],["lElbow","lWrist"],
+      ["rShoulder","rElbow"],["rElbow","rWrist"],
+      ["lHip","rHip"],["lHip","lKnee"],["lKnee","lAnkle"],
+      ["rHip","rKnee"],["rKnee","rAnkle"],
+    ];
+    ctx.shadowColor = color; ctx.shadowBlur = 6;
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;
     bones.forEach(([a, b]) => {
       const [ax, ay] = joints[a]; const [bx, by] = joints[b];
       ctx.beginPath(); ctx.moveTo(cx + ax, cy + ay); ctx.lineTo(cx + bx, cy + by); ctx.stroke();
     });
-    // Joints
     ctx.shadowBlur = 0;
     Object.entries(joints).forEach(([name, [jx, jy]]) => {
       const r = name === "head" ? 7 : 3.5;
       ctx.beginPath(); ctx.arc(cx + jx, cy + jy, r, 0, Math.PI * 2);
-      ctx.fillStyle = name === "head" ? "rgba(255,255,255,0.95)" : color;
-      ctx.fill();
+      ctx.fillStyle = name === "head" ? "rgba(255,255,255,0.95)" : color; ctx.fill();
     });
-    ctx.globalAlpha = 1;
-    ctx.shadowBlur  = 0;
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
   }
 
   function drawOverlay() {
     const canvas = canvasRef.current;
     const video  = videoRef.current;
     if (!canvas || !video) { animRef.current = requestAnimationFrame(drawOverlay); return; }
-    // Match actual rendered video box (letterboxing aware)
-    const vw = video.offsetWidth;
-    const vh = video.offsetHeight;
-    if (canvas.width !== vw) canvas.width = vw;
+
+    // Size canvas to rendered video element (letterboxing aware)
+    const vw = video.offsetWidth, vh = video.offsetHeight;
+    if (canvas.width !== vw)  canvas.width  = vw;
     if (canvas.height !== vh) canvas.height = vh;
     const ctx = canvas.getContext("2d");
     if (!ctx) { animRef.current = requestAnimationFrame(drawOverlay); return; }
@@ -149,19 +209,50 @@ export default function AnalyzePage() {
 
     if (markerPct === null) { animRef.current = requestAnimationFrame(drawOverlay); return; }
 
-    // ── Velocity-compensated position (smooth tracking, no drift) ──────────────
-    // Raw selected position
-    const rawX = (markerPct / 100) * canvas.width;
-    const rawY = targetY !== null ? targetY * canvas.height : canvas.height * 0.55;
+    const sess   = result;
+    const tMs    = video.currentTime * 1000;
+    const cW     = canvas.width, cH = canvas.height;
+    const { width: vidW, height: vidH } = poseMetaRef.current;
 
-    // Get current speed to estimate how far athlete may have moved
-    const sess = result;
+    // ── Find closest pose frame ────────────────────────────────────────────────
+    const frames = poseFramesRef.current;
+    let closestLandmarks: any[] | null = null;
+    if (frames.length > 0) {
+      let best = 0, bestDiff = Infinity;
+      for (let i = 0; i < frames.length; i++) {
+        const d = Math.abs(frames[i].timestamp_ms - tMs);
+        if (d < bestDiff) { bestDiff = d; best = i; }
+      }
+      closestLandmarks = frames[best]?.landmarks ?? null;
+    }
+
+    // ── Build canvas-space joint positions ────────────────────────────────────
+    const joints = closestLandmarks ? getCanvasJoints(closestLandmarks, cW, cH, vidW, vidH) : null;
+
+    // Determine center-of-mass (hips midpoint) and head position
+    let cx: number, cy: number, headX: number, headY: number;
+    if (joints) {
+      const lh = joints.lHip, rh = joints.rHip;
+      cx = lh && rh ? (lh.x + rh.x) / 2 : (lh ?? rh!).x;
+      cy = lh && rh ? (lh.y + rh.y) / 2 : (lh ?? rh!).y;
+      headX = joints.nose?.x ?? cx;
+      headY = joints.nose?.y ?? cy - cH * 0.20;
+    } else {
+      // Fallback: use click point with EMA smoothing
+      const rawX = (markerPct / 100) * cW;
+      const rawY = targetY !== null ? targetY * cH : cH * 0.55;
+      const alpha = 0.12;
+      smoothX.current = smoothX.current === null ? rawX : smoothX.current + alpha * (rawX - smoothX.current);
+      smoothY.current = smoothY.current === null ? rawY : smoothY.current + alpha * (rawY - smoothY.current);
+      cx = smoothX.current; cy = smoothY.current;
+      headX = cx; headY = cy - cH * 0.18 * 1.12;
+    }
+
+    // ── Look up current speed ──────────────────────────────────────────────────
     let currentSpeed = 0;
-    let frameIdx = 0;
     if (sess?.kinematics?.timestamp_ms && sess.kinematics.ankle_speed_ms) {
-      const tMs = video.currentTime * 1000;
-      let minDiff = Infinity;
-      (sess.kinematics.timestamp_ms as number[]).forEach((t, i) => {
+      let minDiff = Infinity, frameIdx = 0;
+      (sess.kinematics.timestamp_ms as number[]).forEach((t: number, i: number) => {
         const d = Math.abs(t - tMs); if (d < minDiff) { minDiff = d; frameIdx = i; }
       });
       currentSpeed = (sess.kinematics.ankle_speed_ms as number[])[frameIdx] ?? 0;
@@ -169,39 +260,63 @@ export default function AnalyzePage() {
       currentSpeed = sess.peakSpeedMs * 0.85;
     }
 
-    // Lerp smoothing factor: slower at high speed (more confident position)
-    // At 0 m/s → α=0.08 (very smooth), at 10 m/s → α=0.18 (more responsive)
-    const alpha = Math.min(0.08 + currentSpeed * 0.01, 0.22);
-    smoothX.current = smoothX.current === null ? rawX : smoothX.current + alpha * (rawX - smoothX.current);
-    smoothY.current = smoothY.current === null ? rawY : smoothY.current + alpha * (rawY - smoothY.current);
-    const cx = smoothX.current;
-    const cy = smoothY.current;
-
     const color = currentSpeed >= 7.5 ? "#F97316" : currentSpeed >= 6 ? "#FBBF24" : "#10B981";
     const now   = Date.now();
     const pulse = (Math.sin(now * 0.004) + 1) / 2;
 
-    // Skeleton (scale proportional to video height)
-    const skeletonScale = canvas.height * 0.18;
-    drawSkeleton(ctx, cx, cy - skeletonScale * 0.1, skeletonScale, color, now);
+    // ── Motion trail: only accumulate when video is playing ───────────────────
+    if (!video.paused && !video.ended) {
+      const trail = trailRef.current;
+      trail.push({ x: cx, y: cy });
+      if (trail.length > 50) trail.shift();
+    }
+    // Draw trail (fading, thickening toward current position)
+    const trail = trailRef.current;
+    if (trail.length > 1) {
+      ctx.lineCap = "round";
+      for (let i = 1; i < trail.length; i++) {
+        const t = i / trail.length;           // 0=oldest → 1=newest
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+        ctx.lineTo(trail[i].x,     trail[i].y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = 2 + t * 3;          // 2px → 5px
+        ctx.globalAlpha = t * 0.5;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
 
-    // Pulsing ellipse at feet (perspective shadow)
-    const feetY = cy + skeletonScale * 0.88;
+    // ── Draw skeleton ──────────────────────────────────────────────────────────
+    if (joints) {
+      drawSkeletonReal(ctx, joints, color);
+    } else {
+      const scale = cH * 0.18;
+      drawSkeletonSynthetic(ctx, cx, cy - scale * 0.1, scale, color, now);
+    }
+
+    // ── Pulsing ellipse at feet ────────────────────────────────────────────────
+    const feetY = joints
+      ? ((joints.lAnkle?.y ?? 0) + (joints.rAnkle?.y ?? 0)) / (joints.lAnkle && joints.rAnkle ? 2 : 1)
+      : cy + cH * 0.18 * 0.88;
     const ringR = 18 + pulse * 6;
     ctx.beginPath(); ctx.ellipse(cx, feetY, ringR, ringR * 0.32, 0, 0, Math.PI * 2);
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.25 + pulse * 0.45; ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // Speed HUD badge above head
-    const hudY = cy - skeletonScale * 1.32;
-    const speedTxt = currentSpeed > 0 ? `${currentSpeed.toFixed(2)} m/s` : sess?.peakSpeedMs ? `${sess.peakSpeedMs.toFixed(2)} m/s` : "— m/s";
-    const badgeW = 84; const badgeH = 26;
+    // ── Speed HUD — anchored above actual head landmark ───────────────────────
+    const hudY = headY - 28;
+    const speedTxt = currentSpeed > 0 ? `${currentSpeed.toFixed(2)} m/s`
+      : sess?.peakSpeedMs ? `${sess.peakSpeedMs.toFixed(2)} m/s` : "— m/s";
+    const badgeW = 84, badgeH = 26;
     ctx.fillStyle = "rgba(0,0,0,0.72)";
-    ctx.beginPath(); (ctx as any).roundRect(cx - badgeW / 2, hudY - badgeH / 2, badgeW, badgeH, 7); ctx.fill();
+    ctx.beginPath(); (ctx as any).roundRect(headX - badgeW / 2, hudY - badgeH / 2, badgeW, badgeH, 7); ctx.fill();
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = color; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(speedTxt, cx, hudY);
-    ctx.beginPath(); ctx.moveTo(cx, hudY + badgeH / 2); ctx.lineTo(cx, cy - skeletonScale * 1.12 - 8);
+    ctx.fillStyle = color; ctx.font = "bold 12px monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(speedTxt, headX, hudY);
+    // Thin connector line: badge → top of head
+    ctx.beginPath(); ctx.moveTo(headX, hudY + badgeH / 2); ctx.lineTo(headX, headY - 8);
     ctx.strokeStyle = `${color}55`; ctx.lineWidth = 1; ctx.stroke();
 
     animRef.current = requestAnimationFrame(drawOverlay);
@@ -282,9 +397,10 @@ export default function AnalyzePage() {
     setTargetX(x);
     setTargetY(y);
     setMarkerPct(x * 100);
-    // Reset smooth tracking so it snaps to the new pick point immediately
+    // Reset smooth tracking and trail so they snap to the new pick point immediately
     smoothX.current = null;
     smoothY.current = null;
+    trailRef.current = [];
     setPickMode(false);
     videoRef.current?.pause();
   }
@@ -338,6 +454,10 @@ export default function AnalyzePage() {
       const res  = await fetch(`${API_BASE}/upload-video`, { method: "POST", body: formData });
       const data = await res.json();
       if (!data.ok) { setStatus("error"); setStatusMsg(data.error ?? "Analysis failed."); return; }
+      // Store raw per-frame pose data for skeleton overlay (not persisted to localStorage)
+      poseFramesRef.current = data.pose?.frames ?? [];
+      poseMetaRef.current   = { width: data.pose?.metadata?.width ?? 1, height: data.pose?.metadata?.height ?? 1 };
+      trailRef.current      = [];
 
       setStatus("analyzing_ai"); setStatusMsg("Running AI analysis…");
 
