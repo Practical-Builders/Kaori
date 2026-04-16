@@ -3,11 +3,30 @@ import Link from "next/link";
 import { useProfile } from "@/contexts/ProfileContext";
 import { useEffect, useState } from "react";
 
+const AUTHED_KEY = "kickiq_authed_email";
+
 export default function Landing() {
-  const { profileComplete } = useProfile();
-  const [mounted, setMounted] = useState(false);
-  // demo is now a dedicated route /demo
-  useEffect(() => { setMounted(true); }, []);
+  const { profileComplete, profile } = useProfile();
+  const [mounted,      setMounted]      = useState(false);
+  const [authed,       setAuthed]       = useState(false);
+  const [userEmail,    setUserEmail]    = useState("");
+  const [acctOpen,     setAcctOpen]     = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const email = sessionStorage.getItem(AUTHED_KEY) ?? "";
+    setAuthed(!!email);
+    setUserEmail(email);
+  }, []);
+
+  function handleSignOut() {
+    sessionStorage.removeItem(AUTHED_KEY);
+    window.location.href = "/login";
+  }
+
+  // Display name: profile name if set, else email prefix
+  const displayName = profile.name || userEmail.split("@")[0] || "Account";
+  const initials = displayName.slice(0, 2).toUpperCase();
 
   return (
     <main style={{ minHeight: "100vh", background: "#0A0F0D", color: "white", fontFamily: "var(--font-body)" }}>
@@ -20,7 +39,7 @@ export default function Landing() {
         background: "rgba(10,15,13,0.85)", backdropFilter: "blur(16px)",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
       }}>
-        <Link href={mounted && profileComplete ? "/profile" : "/"} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+        <Link href={mounted && authed ? "/profile" : "/"} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
             background: "linear-gradient(135deg, #059669, #0D9488)",
@@ -32,7 +51,7 @@ export default function Landing() {
         </Link>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {mounted && profileComplete ? (
+          {mounted && authed ? (
             <>
               <Link href="/analyze" style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.6)", textDecoration: "none", padding: "8px 16px" }}>
                 Add Video
@@ -43,6 +62,42 @@ export default function Landing() {
               }}>
                 Dashboard
               </Link>
+              {/* Account dropdown */}
+              <div style={{ position: "relative" }} onMouseLeave={() => setAcctOpen(false)}>
+                <button
+                  onClick={() => setAcctOpen(o => !o)}
+                  style={{
+                    width: 34, height: 34, borderRadius: "50%",
+                    background: "linear-gradient(135deg,#059669,#0D9488)",
+                    border: "2px solid rgba(255,255,255,0.15)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: "pointer", color: "white", fontWeight: 700, fontSize: 12,
+                    fontFamily: "var(--font-display)",
+                  }}
+                >
+                  {initials}
+                </button>
+                {acctOpen && (
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: 200,
+                    background: "#1A2420", border: "1px solid rgba(255,255,255,0.1)",
+                    borderRadius: 12, boxShadow: "0 12px 40px rgba(0,0,0,0.3)", overflow: "hidden", zIndex: 200,
+                  }}>
+                    <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 2 }}>Signed in as</p>
+                      <p style={{ fontSize: 13, color: "white", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userEmail}</p>
+                    </div>
+                    <Link href="/profile" onClick={() => setAcctOpen(false)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 16px", color: "rgba(255,255,255,0.7)", fontSize: 13, fontWeight: 500, textDecoration: "none", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                      My Dashboard
+                    </Link>
+                    <button onClick={handleSignOut} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 16px", background: "none", border: "none", color: "#FCA5A5", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <>
@@ -53,7 +108,7 @@ export default function Landing() {
                 fontSize: 14, fontWeight: 700, color: "white", textDecoration: "none",
                 padding: "8px 20px", borderRadius: 8, background: "#059669",
               }}>
-                Get Started
+                Create Account
               </Link>
             </>
           )}
