@@ -1421,9 +1421,21 @@ function MessagingPanel({
 // ── Edit Modal (for profile settings tab) ─────────────────────────────────────
 function EditModal({ onClose }: { onClose: () => void }) {
   const { profile, setProfile } = useProfile();
-  const [tab, setTab] = useState<"personal"|"soccer"|"injuries">("personal");
+  const isRec = (profile as any).accountType === "recruiter";
+  const [tab, setTab] = useState<string>(isRec ? "profile" : "personal");
   const fileRef = useRef<HTMLInputElement>(null);
   const [newInj, setNewInj] = useState({ type: "", date: "", status: "recovered" as const, notes: "" });
+
+  // Recruiter scouting positions
+  const SCOUT_POSITIONS = ["Goalkeeper", "Defender", "Midfielder", "Winger", "Striker/Forward"];
+  const scoutPositions: string[] = (profile as any).scoutPositions || [];
+
+  function toggleScoutPosition(pos: string) {
+    const next = scoutPositions.includes(pos)
+      ? scoutPositions.filter((p: string) => p !== pos)
+      : [...scoutPositions, pos];
+    setProfile({ scoutPositions: next } as any);
+  }
 
   function handlePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -1436,21 +1448,112 @@ function EditModal({ onClose }: { onClose: () => void }) {
   const lStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" };
   const reqStyle: React.CSSProperties = { ...lStyle, color: "rgba(52,211,153,0.7)" };
 
+  const athleteTabs = ["personal", "soccer", "injuries"] as const;
+  const recruiterTabs = ["profile", "scouting"] as const;
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={onClose} />
       <div style={{ position: "relative", width: "100%", maxWidth: 680, maxHeight: "90vh", display: "flex", flexDirection: "column", background: "#111816", borderRadius: 24, overflow: "hidden", boxShadow: "0 40px 100px rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.08)" }}>
         <div style={{ padding: "20px 28px", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: "white" }}>Edit Profile</p>
+          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: "white" }}>{isRec ? "Scout Profile" : "Edit Profile"}</p>
           <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,0.07)", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 15 }}>✕</button>
         </div>
         <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-          {(["personal","soccer","injuries"] as const).map(t => (
+          {(isRec ? recruiterTabs : athleteTabs).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: "14px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", background: "none", border: "none", textTransform: "capitalize", color: tab === t ? "#10B981" : "rgba(255,255,255,0.3)", borderBottom: tab === t ? "2px solid #059669" : "2px solid transparent" }}>{t}</button>
           ))}
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 28, background: "#111816" }}>
-          {tab === "personal" && (
+
+          {/* ── RECRUITER: profile tab ── */}
+          {isRec && tab === "profile" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 20, background: "rgba(255,255,255,0.04)", borderRadius: 16, padding: 20, border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div onClick={() => fileRef.current?.click()} style={{ width: 80, height: 80, borderRadius: 20, border: "2px dashed rgba(255,255,255,0.15)", cursor: "pointer", overflow: "hidden", background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {profile.photoUrl ? <img src={profile.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5" strokeLinecap="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>}
+                </div>
+                <div>
+                  <p style={{ fontWeight: 700, fontSize: 15, color: "white" }}>Profile Photo</p>
+                  <button onClick={() => fileRef.current?.click()} style={{ background: "none", border: "none", cursor: "pointer", color: "#10B981", fontSize: 13, fontWeight: 600, padding: 0, marginTop: 4 }}>Upload photo →</button>
+                  <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handlePhoto} />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={reqStyle}>Full Name <span style={{color:"#10B981"}}>*</span></label>
+                  <input style={iStyle} value={profile.name||""} onChange={e=>setProfile({name:e.target.value} as any)} placeholder="Your Name" />
+                </div>
+                <div>
+                  <label style={lStyle}>Email</label>
+                  <input style={iStyle} type="email" value={profile.email||""} onChange={e=>setProfile({email:e.target.value})} placeholder="your@email.com" />
+                </div>
+                <div>
+                  <label style={lStyle}>Organization / Club</label>
+                  <input style={iStyle} value={(profile as any).organization||""} onChange={e=>setProfile({organization:e.target.value} as any)} placeholder="FC United Scouting" />
+                </div>
+                <div>
+                  <label style={lStyle}>Role</label>
+                  <select style={{...iStyle, cursor:"pointer"}} value={(profile as any).recruiterRole||"Scout"} onChange={e=>setProfile({recruiterRole:e.target.value} as any)}>
+                    {["Scout","Head Coach","Analyst","Director of Recruitment","Agent"].map(r=><option key={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={lStyle}>Phone</label>
+                  <input style={iStyle} value={(profile as any).phone||""} onChange={e=>setProfile({phone:e.target.value} as any)} placeholder="+1 555 000 0000" />
+                </div>
+                <div>
+                  <label style={lStyle}>Location</label>
+                  <input style={iStyle} value={profile.location||""} onChange={e=>setProfile({location:e.target.value})} placeholder="Los Angeles, CA" />
+                </div>
+              </div>
+              <div>
+                <label style={lStyle}>Bio / Scouting Focus</label>
+                <textarea style={{...iStyle, resize:"none"}} rows={3} value={profile.bio||""} onChange={e=>setProfile({bio:e.target.value})} placeholder="Describe your scouting focus and methodology..." />
+              </div>
+            </div>
+          )}
+
+          {/* ── RECRUITER: scouting tab ── */}
+          {isRec && tab === "scouting" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div>
+                <label style={lStyle}>Preferred Positions</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 6 }}>
+                  {SCOUT_POSITIONS.map(pos => {
+                    const active = scoutPositions.includes(pos);
+                    return (
+                      <button key={pos} type="button" onClick={() => toggleScoutPosition(pos)}
+                        style={{ padding: "10px 8px", borderRadius: 10, border: `1px solid ${active ? "rgba(5,150,105,0.5)" : "rgba(255,255,255,0.12)"}`, background: active ? "rgba(5,150,105,0.15)" : "rgba(255,255,255,0.04)", color: active ? "#10B981" : "rgba(255,255,255,0.5)", fontWeight: 700, fontSize: 12, cursor: "pointer", textAlign: "center" }}>
+                        {pos}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={lStyle}>Age Range — From</label>
+                  <input style={iStyle} type="number" value={(profile as any).ageRangeFrom||""} onChange={e=>setProfile({ageRangeFrom:e.target.value} as any)} placeholder="16" />
+                </div>
+                <div>
+                  <label style={lStyle}>Age Range — To</label>
+                  <input style={iStyle} type="number" value={(profile as any).ageRangeTo||""} onChange={e=>setProfile({ageRangeTo:e.target.value} as any)} placeholder="23" />
+                </div>
+              </div>
+              <div>
+                <label style={lStyle}>Target Leagues</label>
+                <input style={iStyle} value={(profile as any).targetLeagues||""} onChange={e=>setProfile({targetLeagues:e.target.value} as any)} placeholder="Liga MX Femenil, NWSL" />
+              </div>
+              <div>
+                <label style={lStyle}>Scouting Regions</label>
+                <input style={iStyle} value={(profile as any).scoutingRegions||""} onChange={e=>setProfile({scoutingRegions:e.target.value} as any)} placeholder="CONCACAF, Mexico" />
+              </div>
+            </div>
+          )}
+
+          {/* ── ATHLETE: personal tab ── */}
+          {!isRec && tab === "personal" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 20, background: "rgba(255,255,255,0.04)", borderRadius: 16, padding: 20, border: "1px solid rgba(255,255,255,0.08)" }}>
                 <div onClick={() => fileRef.current?.click()} style={{ width: 80, height: 80, borderRadius: 20, border: "2px dashed rgba(255,255,255,0.15)", cursor: "pointer", overflow: "hidden", background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1487,7 +1590,9 @@ function EditModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
-          {tab === "soccer" && (
+
+          {/* ── ATHLETE: soccer tab ── */}
+          {!isRec && tab === "soccer" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div><label style={lStyle}>Primary Position</label><select style={{...iStyle,cursor:"pointer"}} value={profile.primaryPosition||""} onChange={e=>setProfile({primaryPosition:e.target.value})}><option value="">Select…</option>{POSITIONS.map(p=><option key={p}>{p}</option>)}</select></div>
@@ -1501,7 +1606,9 @@ function EditModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
-          {tab === "injuries" && (
+
+          {/* ── ATHLETE: injuries tab ── */}
+          {!isRec && tab === "injuries" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {!(profile.injuries?.length) && <div style={{ textAlign: "center", padding: "32px 16px", background: "rgba(255,255,255,0.03)", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)" }}><p style={{ color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>No injuries recorded</p></div>}
               {(profile.injuries||[]).map(inj => (
@@ -1546,6 +1653,14 @@ export default function ProfilePage() {
   const [activeMsgConvId, setActiveMsgConvId] = useState<string | null>(null);
   const [msgOpenWithAthlete, setMsgOpenWithAthlete] = useState<string | null>(null);
   const router = useRouter();
+
+  // Namespaced storage keys (per authenticated user)
+  const authedEmail = typeof window !== "undefined" ? (sessionStorage.getItem(AUTHED_KEY) ?? "") : "";
+  const safeEmail = authedEmail.replace(/[^a-zA-Z0-9@._-]/g, "_");
+
+  // Account type helpers – must be defined before any JSX that uses them
+  const isRecruiter = (profile as any).accountType === "recruiter";
+  const profileReady = isRecruiter ? Boolean(profile.name) : profileComplete;
 
   // Auth guard + default to light mode
   useEffect(() => {
@@ -1629,9 +1744,6 @@ export default function ProfilePage() {
 
   // Pinned sessions
   const pinnedSessions = sessions.filter(s => pinnedIds.includes(s.id));
-
-  // Account type
-  const isRecruiter = (profile as any).accountType === "recruiter";
 
   const bg = isDark ? "#0A0F0D" : "#F4FBF8";
   const card = isDark ? "#141A17" : "white";
@@ -1732,21 +1844,36 @@ export default function ProfilePage() {
       </nav>
 
       {/* ── EMPTY STATE ── */}
-      {!profileComplete && (
+      {!profileReady && (
         <div style={{ maxWidth: 480, margin: "0 auto", padding: "100px 24px", textAlign: "center" }}>
-          <div style={{ width: 100, height: 100, borderRadius: 28, background: isDark ? "rgba(5,150,105,0.1)" : "#F0FDF9", border: `2px dashed ${isDark ? "rgba(5,150,105,0.3)" : "#A7F3D0"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 28px" }}>
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.4" strokeLinecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          </div>
-          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 40, color: text1, lineHeight: 1.1, marginBottom: 14 }}>Build Your Profile</p>
-          <p style={{ color: text2, fontSize: 16, lineHeight: 1.6, marginBottom: 36 }}>Add your info to track performance and get discovered by coaches.</p>
-          <button onClick={() => setEditOpen(true)} style={{ padding: "16px 40px", fontSize: 18, fontFamily: "var(--font-display)", fontWeight: 800, borderRadius: 16, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", width: "100%", boxShadow: "0 8px 24px rgba(5,150,105,0.35)" }}>
-            Get Started →
-          </button>
+          {isRecruiter ? (
+            <>
+              <div style={{ width: 100, height: 100, borderRadius: 28, background: isDark ? "rgba(13,148,136,0.1)" : "#F0FDFA", border: `2px dashed ${isDark ? "rgba(13,148,136,0.3)" : "#99F6E4"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 28px" }}>
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#0D9488" strokeWidth="1.4" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 36, color: text1, lineHeight: 1.1, marginBottom: 14 }}>Set Up Your Scout Profile</p>
+              <p style={{ color: text2, fontSize: 16, lineHeight: 1.6, marginBottom: 36 }}>Configure your scout profile to start browsing and connecting with top athletes.</p>
+              <button onClick={() => setActiveTab("settings-rec")} style={{ padding: "16px 40px", fontSize: 18, fontFamily: "var(--font-display)", fontWeight: 800, borderRadius: 16, background: "linear-gradient(135deg,#0D9488,#059669)", color: "white", border: "none", cursor: "pointer", width: "100%", boxShadow: "0 8px 24px rgba(13,148,136,0.35)" }}>
+                Set Up Profile →
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ width: 100, height: 100, borderRadius: 28, background: isDark ? "rgba(5,150,105,0.1)" : "#F0FDF9", border: `2px dashed ${isDark ? "rgba(5,150,105,0.3)" : "#A7F3D0"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 28px" }}>
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.4" strokeLinecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              </div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 40, color: text1, lineHeight: 1.1, marginBottom: 14 }}>Build Your Profile</p>
+              <p style={{ color: text2, fontSize: 16, lineHeight: 1.6, marginBottom: 36 }}>Add your info to track performance and get discovered by coaches.</p>
+              <button onClick={() => setEditOpen(true)} style={{ padding: "16px 40px", fontSize: 18, fontFamily: "var(--font-display)", fontWeight: 800, borderRadius: 16, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", width: "100%", boxShadow: "0 8px 24px rgba(5,150,105,0.35)" }}>
+                Get Started →
+              </button>
+            </>
+          )}
         </div>
       )}
 
       {/* ── MAIN CONTENT ── */}
-      {profileComplete && (
+      {profileReady && (
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 24px 80px" }}>
 
           {/* ── PERFORMANCE TAB ── */}
@@ -2154,7 +2281,7 @@ export default function ProfilePage() {
                     style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
                     Log out
                   </button>
-                  <button onClick={() => { if (confirm("Delete your profile and all sessions? This cannot be undone.")) { localStorage.removeItem("kaori_profile"); localStorage.removeItem("kaori_sessions"); window.location.href = "/"; } }}
+                  <button onClick={() => { if (confirm("Delete your profile and all sessions? This cannot be undone.")) { localStorage.removeItem(`kaori_profile_${safeEmail}`); localStorage.removeItem(`kaori_sessions_${safeEmail}`); window.location.href = "/"; } }}
                     style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
                     Delete Account
                   </button>
@@ -2195,6 +2322,18 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </div>
+
+              {/* Welcome / onboarding banner — shown until organization is filled */}
+              {!(profile as any).organization && (
+                <div style={{ marginBottom: 20, padding: "16px 20px", borderRadius: 14, background: "linear-gradient(135deg,rgba(13,148,136,0.15),rgba(5,150,105,0.1))", border: "1px solid rgba(13,148,136,0.3)", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 20 }}>👋</span>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <p style={{ fontWeight: 700, fontSize: 14, color: text1 }}>Welcome to KickIQ Scout!</p>
+                    <p style={{ fontSize: 12, color: text2, marginTop: 2 }}>Complete your scout profile to start connecting with athletes.</p>
+                  </div>
+                  <button onClick={() => setActiveTab("settings-rec")} style={{ padding: "9px 18px", borderRadius: 10, background: "linear-gradient(135deg,#0D9488,#059669)", color: "white", fontWeight: 700, fontSize: 13, border: "none", cursor: "pointer", flexShrink: 0 }}>Complete Profile →</button>
+                </div>
+              )}
 
               <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 6 }}>Scout Board</p>
               <p style={{ color: text2, fontSize: 13, marginBottom: 20 }}>Browse athlete profiles. Watch or message any prospect.</p>
@@ -2381,7 +2520,7 @@ export default function ProfilePage() {
                   <button onClick={() => { sessionStorage.removeItem(AUTHED_KEY); window.location.href = "/login"; }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
                     Log out
                   </button>
-                  <button onClick={() => { if (confirm("Delete your account? This cannot be undone.")) { localStorage.removeItem("kaori_profile"); localStorage.removeItem("kaori_sessions"); window.location.href = "/"; } }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+                  <button onClick={() => { if (confirm("Delete your account? This cannot be undone.")) { localStorage.removeItem(`kaori_profile_${safeEmail}`); localStorage.removeItem(`kaori_sessions_${safeEmail}`); window.location.href = "/"; } }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
                     Delete Account
                   </button>
                 </div>
