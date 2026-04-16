@@ -14,7 +14,7 @@ const DEMO_ATHLETES = [
     bio: "Clinical finisher with explosive acceleration. Dangerous on and off the ball — reads the defense before the pass arrives.",
     peakSpeedMs: 8.4, symmetryScore: 88, sessions: 6, risk: "low",
     moves: ["One-Touch Finish","Run in Behind","Hold-Up Play","Late Run"],
-    photo: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=200&q=80",
+    photo: "https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&w=200&q=80",
     goals: "16", assists: "5", appearances: "13",
   },
   {
@@ -25,7 +25,7 @@ const DEMO_ATHLETES = [
     bio: "Creative playmaker with natural vision and technique beyond her age. Links play effortlessly and delivers in tight spaces.",
     peakSpeedMs: 7.6, symmetryScore: 91, sessions: 5, risk: "low",
     moves: ["Through Ball","Dribble into Box","Free Kick","Press Trigger"],
-    photo: "https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?auto=format&fit=crop&w=200&q=80",
+    photo: "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=200&q=80",
     goals: "7", assists: "14", appearances: "12",
   },
   {
@@ -36,7 +36,7 @@ const DEMO_ATHLETES = [
     bio: "Rapid wide forward who lives off 1v1 duels. Cuts inside onto her stronger foot and has an eye for goal from range.",
     peakSpeedMs: 8.8, symmetryScore: 85, sessions: 4, risk: "moderate",
     moves: ["Sprint in Behind","Cutback","1v1 Dribble","Inverted Cut"],
-    photo: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&q=80",
+    photo: "/athletes/ines.jpeg",
     goals: "11", assists: "9", appearances: "14",
   },
   {
@@ -47,7 +47,7 @@ const DEMO_ATHLETES = [
     bio: "Composed, dominant defender who reads the game two steps ahead. Comfortable bringing the ball out from the back under pressure.",
     peakSpeedMs: 7.2, symmetryScore: 90, sessions: 7, risk: "low",
     moves: ["Aerial Duel","Recovery Run","Long Ball Switch","Stepping Out"],
-    photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80",
+    photo: "/athletes/joca.jpeg",
     goals: "2", assists: "3", appearances: "15",
   },
   {
@@ -58,7 +58,7 @@ const DEMO_ATHLETES = [
     bio: "Elite shot-stopper with fast reflexes and calm distribution. Commands her box confidently and sweeps behind the line when needed.",
     peakSpeedMs: 6.5, symmetryScore: 93, sessions: 8, risk: "low",
     moves: ["Shot Stop","Sweeper Keeper","Distribution","Command of Area"],
-    photo: "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=200&q=80",
+    photo: "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=200&q=80",
     goals: "0", assists: "2", appearances: "16",
   },
   {
@@ -69,7 +69,7 @@ const DEMO_ATHLETES = [
     bio: "Box-to-box engine with tireless work rate and a sharp football brain. Wins the ball back quickly and distributes without fuss.",
     peakSpeedMs: 7.9, symmetryScore: 87, sessions: 5, risk: "low",
     moves: ["Box-to-Box Run","Interception","Through Ball","Press Trigger"],
-    photo: "https://images.unsplash.com/photo-1594736797933-d0401ba2fe65?auto=format&fit=crop&w=200&q=80",
+    photo: "/athletes/melina.jpeg",
     goals: "4", assists: "11", appearances: "13",
   },
   {
@@ -80,7 +80,7 @@ const DEMO_ATHLETES = [
     bio: "Attack-minded left back with an electric engine and dangerous delivery. Tracks back diligently but is at her best bombing forward.",
     peakSpeedMs: 8.1, symmetryScore: 89, sessions: 6, risk: "low",
     moves: ["Overlap Run","Cross","Recovery Sprint","Tuck Inside"],
-    photo: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=200&q=80",
+    photo: "/athletes/niza.jpeg",
     goals: "5", assists: "13", appearances: "14",
   },
 ];
