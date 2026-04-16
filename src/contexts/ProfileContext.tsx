@@ -101,19 +101,32 @@ interface ProfileContextValue {
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
-const STORAGE_KEY_PROFILE  = "kaori_profile";
-const STORAGE_KEY_SESSIONS = "kaori_sessions";
+const AUTHED_KEY = "kickiq_authed_email";
+
+function storageKeys() {
+  try {
+    const email = sessionStorage.getItem(AUTHED_KEY) ?? "guest";
+    const safe  = email.replace(/[^a-zA-Z0-9@._-]/g, "_");
+    return {
+      profile:  `kaori_profile_${safe}`,
+      sessions: `kaori_sessions_${safe}`,
+    };
+  } catch {
+    return { profile: "kaori_profile", sessions: "kaori_sessions" };
+  }
+}
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const [profile,  setProfileState]  = useState<AthleteProfile>(DEFAULT_PROFILE);
   const [sessions, setSessionsState] = useState<AnalysisSession[]>([]);
   const [loaded,   setLoaded]        = useState(false);
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount (keyed by authenticated email)
   useEffect(() => {
     try {
-      const p = localStorage.getItem(STORAGE_KEY_PROFILE);
-      const s = localStorage.getItem(STORAGE_KEY_SESSIONS);
+      const { profile: pk, sessions: sk } = storageKeys();
+      const p = localStorage.getItem(pk);
+      const s = localStorage.getItem(sk);
       if (p) setProfileState(JSON.parse(p));
       if (s) setSessionsState(JSON.parse(s));
     } catch {}
@@ -123,13 +136,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   // Persist profile
   useEffect(() => {
     if (!loaded) return;
-    try { localStorage.setItem(STORAGE_KEY_PROFILE, JSON.stringify(profile)); } catch {}
+    try { localStorage.setItem(storageKeys().profile, JSON.stringify(profile)); } catch {}
   }, [profile, loaded]);
 
   // Persist sessions
   useEffect(() => {
     if (!loaded) return;
-    try { localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(sessions)); } catch {}
+    try { localStorage.setItem(storageKeys().sessions, JSON.stringify(sessions)); } catch {}
   }, [sessions, loaded]);
 
   function setProfile(updates: Partial<AthleteProfile>) {

@@ -484,40 +484,118 @@ function SessionVideoModal({ session, onClose }: { session: AnalysisSession; onC
 
 // ── Progress Charts Tab ────────────────────────────────────────────────────────
 function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark: boolean }) {
-  const text1 = isDark ? "white" : "#0D1F17";
-  const text2 = isDark ? "rgba(255,255,255,0.4)" : "#5A7268";
-  const card  = isDark ? "#141A17" : "white";
-  const border = isDark ? "rgba(255,255,255,0.08)" : "rgba(5,150,105,0.12)";
-  const gridColor = isDark ? "rgba(255,255,255,0.05)" : "rgba(5,150,105,0.08)";
-  const axisColor = isDark ? "rgba(255,255,255,0.25)" : "#8AB5A3";
+  const text1  = isDark ? "white"                      : "#0D1F17";
+  const text2  = isDark ? "rgba(255,255,255,0.4)"      : "#5A7268";
+  const card   = isDark ? "#141A17"                    : "white";
+  const border = isDark ? "rgba(255,255,255,0.08)"     : "rgba(5,150,105,0.12)";
+  const gridColor = isDark ? "rgba(255,255,255,0.05)"  : "rgba(5,150,105,0.08)";
+  const axisColor = isDark ? "rgba(255,255,255,0.25)"  : "#8AB5A3";
+
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [doctorOpen,   setDoctorOpen]   = useState(false);
+  const [coachOpen,    setCoachOpen]    = useState(false);
 
   const sorted = [...sessions].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const speedData = sorted
-    .filter(s => s.peakSpeedMs)
-    .map((s, i) => ({
-      session: i + 1,
-      label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      speed: parseFloat(s.peakSpeedMs!.toFixed(2)),
-      mean: s.meanSpeedMs ? parseFloat(s.meanSpeedMs.toFixed(2)) : undefined,
-    }));
+  const speedData = sorted.filter(s => s.peakSpeedMs).map((s, i) => ({
+    session: i + 1,
+    label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    speed: parseFloat(s.peakSpeedMs!.toFixed(2)),
+    mean: s.meanSpeedMs ? parseFloat(s.meanSpeedMs.toFixed(2)) : undefined,
+  }));
+  const symmetryData = sorted.filter(s => s.symmetryScore).map((s, i) => ({
+    session: i + 1,
+    label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    symmetry: parseFloat(s.symmetryScore!.toFixed(1)),
+  }));
+  const riskData = sorted.filter(s => s.overallRiskScore !== undefined).map((s, i) => ({
+    session: i + 1,
+    label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    risk: s.overallRiskScore,
+    fill: s.overallRisk === "low" ? "#10B981" : s.overallRisk === "moderate" ? "#FBBF24" : "#F87171",
+  }));
 
-  const symmetryData = sorted
-    .filter(s => s.symmetryScore)
-    .map((s, i) => ({
-      session: i + 1,
-      label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      symmetry: parseFloat(s.symmetryScore!.toFixed(1)),
-    }));
+  const avgSpeed  = speedData.length    ? (speedData.reduce((a, d) => a + d.speed, 0) / speedData.length) : null;
+  const bestSpeed = speedData.length    ? Math.max(...speedData.map(d => d.speed)) : null;
+  const avgSym    = symmetryData.length ? (symmetryData.reduce((a, d) => a + d.symmetry, 0) / symmetryData.length) : null;
+  const latestRisk = riskData.length    ? riskData[riskData.length - 1] : null;
+  const latestRiskLabel = latestRisk?.fill === "#10B981" ? "Low" : latestRisk?.fill === "#FBBF24" ? "Moderate" : latestRisk ? "High" : null;
 
-  const riskData = sorted
-    .filter(s => s.overallRiskScore !== undefined)
-    .map((s, i) => ({
-      session: i + 1,
-      label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      risk: s.overallRiskScore,
-      fill: s.overallRisk === "low" ? "#10B981" : s.overallRisk === "moderate" ? "#FBBF24" : "#F87171",
-    }));
+  // Speed trend (improving/declining/stable)
+  const speedTrend = speedData.length >= 2
+    ? speedData[speedData.length - 1].speed > speedData[0].speed ? "improving" : speedData[speedData.length - 1].speed < speedData[0].speed ? "declining" : "stable"
+    : "stable";
+  const symTrend = symmetryData.length >= 2
+    ? symmetryData[symmetryData.length - 1].symmetry > symmetryData[0].symmetry ? "improving" : symmetryData[symmetryData.length - 1].symmetry < symmetryData[0].symmetry ? "declining" : "stable"
+    : "stable";
+
+  // ── AI Coach text ─────────────────────────────────────────────────────────────
+  const coachLines: { icon: string; title: string; body: string; color: string }[] = [];
+  if (bestSpeed !== null) {
+    if (bestSpeed >= 8.5)      coachLines.push({ icon: "⚡", title: "Elite Sprint Speed", body: `Your peak of ${bestSpeed.toFixed(2)} m/s puts you in the top tier for your age group. Focus on maintaining this across full 90-minute scenarios — conditioning is your next frontier.`, color: "#10B981" });
+    else if (bestSpeed >= 7.0) coachLines.push({ icon: "⚡", title: "Good Sprint Pace", body: `${bestSpeed.toFixed(2)} m/s is solid. To push past 8 m/s, add short explosive intervals (3×10m fly-sprints) 2× per week. Your acceleration window is where you'll gain the most ground.`, color: "#34D399" });
+    else                       coachLines.push({ icon: "⚡", title: "Speed Development", body: `At ${bestSpeed.toFixed(2)} m/s there's significant room to grow. Prioritize sprint mechanics — hip drive, arm angle, and ground contact time. A sprint coach for 4–6 weeks would accelerate your progress.`, color: "#FBBF24" });
+  }
+  if (avgSym !== null) {
+    if (avgSym >= 85)          coachLines.push({ icon: "⚖️", title: "Excellent Balance", body: `${avgSym.toFixed(1)}% bilateral symmetry is exceptional. Your movement is efficient. Keep incorporating single-leg stability work to protect this score during fatigue.`, color: "#06B6D4" });
+    else if (avgSym >= 70)     coachLines.push({ icon: "⚖️", title: "Symmetry to Improve", body: `Your ${avgSym.toFixed(1)}% balance score suggests a minor left/right loading difference. Add 10 min of unilateral exercises (single-leg squats, single-leg deadlifts) every training day.`, color: "#06B6D4" });
+    else                       coachLines.push({ icon: "⚖️", title: "Balance Priority", body: `${avgSym.toFixed(1)}% symmetry indicates a notable imbalance. This will affect your change-of-direction power and increase injury risk. Make unilateral corrective work your #1 priority for the next 3 weeks.`, color: "#F59E0B" });
+  }
+  if (speedTrend === "improving") coachLines.push({ icon: "📈", title: "Speed Trending Up", body: "Your sprint data is moving in the right direction. The key now is recovery quality — make sure you're getting 8h sleep and eating protein within 30 min of training.", color: "#10B981" });
+  if (speedTrend === "declining") coachLines.push({ icon: "📉", title: "Speed Drop Detected", body: "Your most recent session was slower than your baseline. This often signals accumulated fatigue or reduced training intensity. Consider a recovery week before your next hard block.", color: "#F87171" });
+  if (sessions.length >= 5)       coachLines.push({ icon: "🏋️", title: "Consistent Athlete", body: `${sessions.length} sessions analyzed — you're building a reliable data profile. Keep uploading every training block so your trends stay meaningful.`, color: "#A78BFA" });
+  else                            coachLines.push({ icon: "📹", title: "Build Your Profile", body: `You have ${sessions.length} session${sessions.length === 1 ? "" : "s"} — aim for at least 5 to unlock reliable trend analysis. Film training 2× per week if possible.`, color: "#A78BFA" });
+  const allMoves = Array.from(new Set(sessions.flatMap(s => s.movesIdentified || [])));
+  if (allMoves.length > 0) coachLines.push({ icon: "🎯", title: "Signature Moves", body: `Your most detected patterns: ${allMoves.slice(0, 3).join(", ")}. Lean into these strengths in matches while also diversifying your toolkit — scouts look for unpredictability.`, color: "#F59E0B" });
+
+  // ── AI Doctor text ────────────────────────────────────────────────────────────
+  const riskLevel   = latestRisk?.fill === "#10B981" ? "low" : latestRisk?.fill === "#FBBF24" ? "moderate" : latestRisk ? "high" : "unknown";
+  const riskScore   = latestRisk?.risk ?? 0;
+  const doctorAreas: { area: string; risk: string; pct: number; color: string; advice: string }[] = [];
+
+  // ACL / Knee — driven by symmetry and speed
+  const aclPct = avgSym !== null ? Math.max(10, Math.min(85, 100 - avgSym)) : 30;
+  doctorAreas.push({
+    area: "ACL / Knee", risk: aclPct > 55 ? "Moderate" : "Low", pct: Math.round(aclPct),
+    color: aclPct > 55 ? "#F59E0B" : "#10B981",
+    advice: aclPct > 55
+      ? "Your symmetry data suggests uneven loading on your knee joint. Prioritise Nordic curl progressions and single-leg landing mechanics. Avoid overloading plyometrics until symmetry improves past 75%."
+      : "Your knee loading pattern looks balanced. Continue routine quad/hamstring strength parity work (target 60–70% hamstring-to-quad ratio) to keep this risk low.",
+  });
+
+  // Hamstring — driven by peak speed
+  const hamPct = bestSpeed !== null ? Math.max(10, Math.min(80, (bestSpeed / 12) * 60)) : 20;
+  doctorAreas.push({
+    area: "Hamstring", risk: hamPct > 50 ? "Moderate" : "Low", pct: Math.round(hamPct),
+    color: hamPct > 50 ? "#F59E0B" : "#10B981",
+    advice: hamPct > 50
+      ? `At ${bestSpeed?.toFixed(2)} m/s your hamstrings are working near maximum. Nordic curls 3× per week, progressive sprint load management, and always include a proper dynamic warm-up before high-intensity runs.`
+      : "Speed-related hamstring stress appears manageable. Maintain a progressive sprint load and include Nordic curls in your weekly strength routine as prevention.",
+  });
+
+  // Ankle — driven by session count (more sessions = more cumulative load)
+  const anklePct = Math.min(60, sessions.length * 5 + 10);
+  doctorAreas.push({
+    area: "Ankle / Lower Leg", risk: anklePct > 40 ? "Moderate" : "Low", pct: Math.round(anklePct),
+    color: anklePct > 40 ? "#F59E0B" : "#10B981",
+    advice: anklePct > 40
+      ? "Cumulative session load is building ankle stress. Add band-resistance ankle circles and single-leg calf raises daily. Consider taping or bracing during high-intensity sessions."
+      : "Ankle load is within normal range. Continue proprioception training (balance board, single-leg holds) to keep ligament resilience high.",
+  });
+
+  // Lower Back — driven by symmetry imbalance
+  const backPct = avgSym !== null ? Math.max(8, Math.min(70, (90 - avgSym) * 0.8)) : 15;
+  doctorAreas.push({
+    area: "Lower Back / Hip", risk: backPct > 45 ? "Moderate" : "Low", pct: Math.round(backPct),
+    color: backPct > 45 ? "#F59E0B" : "#10B981",
+    advice: backPct > 45
+      ? "Bilateral asymmetry in movement can load the lumbar spine unevenly over time. Incorporate hip flexor stretching, glute activation (banded clamshells) and core anti-rotation work (Pallof press) daily."
+      : "Spinal load indicators look fine. Keep your core program consistent — planks, dead bugs, and hip hinge patterns protect the lower back long-term.",
+  });
+
+  const overallDoctorRisk = doctorAreas.filter(a => a.risk === "Moderate").length;
+  const doctorSummaryColor = overallDoctorRisk >= 2 ? "#F59E0B" : overallDoctorRisk === 1 ? "#FBBF24" : "#10B981";
+  const doctorSummaryLabel = overallDoctorRisk >= 2 ? "Moderate Risk" : overallDoctorRisk === 1 ? "Low-Moderate" : "Low Risk";
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
@@ -531,11 +609,6 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
     );
   };
 
-  const avgSpeed = speedData.length ? (speedData.reduce((a, d) => a + d.speed, 0) / speedData.length).toFixed(2) : "—";
-  const bestSpeed = speedData.length ? Math.max(...speedData.map(d => d.speed)).toFixed(2) : "—";
-  const avgSym = symmetryData.length ? (symmetryData.reduce((a, d) => a + d.symmetry, 0) / symmetryData.length).toFixed(1) : "—";
-  const latestRisk = riskData.length ? riskData[riskData.length - 1] : null;
-
   if (sessions.length === 0) {
     return (
       <div style={{ padding: "80px 24px", textAlign: "center", background: card, border: `1px solid ${border}`, borderRadius: 18 }}>
@@ -546,26 +619,142 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
     );
   }
 
+  // ── Flashcard definitions ─────────────────────────────────────────────────────
+  const flashCards = [
+    {
+      id: "speed", label: "BEST SPEED", value: bestSpeed ? `${bestSpeed.toFixed(2)} m/s` : "—", sub: "peak recorded", color: "#10B981",
+      icon: "⚡",
+      detail: {
+        headline: bestSpeed && bestSpeed >= 8 ? "Elite-level pace" : bestSpeed && bestSpeed >= 6.5 ? "Solid sprint speed" : "Speed in development",
+        stat: bestSpeed ? `${bestSpeed.toFixed(2)} m/s` : "—",
+        context: bestSpeed ? `${(bestSpeed * 3.6).toFixed(1)} km/h · ${bestSpeed >= 8 ? "Top 15% for your position" : bestSpeed >= 6.5 ? "Average range for elite youth" : "Below competitive average"}` : "",
+        trend: speedTrend,
+        bullets: [
+          bestSpeed && bestSpeed >= 8 ? "Acceleration phase is a key asset" : "Focus on explosive starts from standing",
+          "Elite female sprinters reach 9–10 m/s — you have room to close the gap",
+          speedTrend === "improving" ? "Trend: improving across sessions ↑" : speedTrend === "declining" ? "Trend: recent dip — check recovery" : "Trend: stable across sessions",
+        ],
+      },
+    },
+    {
+      id: "avgspeed", label: "AVG SPEED", value: avgSpeed ? `${avgSpeed.toFixed(2)} m/s` : "—", sub: "across sessions", color: "#34D399",
+      icon: "🏃",
+      detail: {
+        headline: avgSpeed && avgSpeed >= 6 ? "Consistent intensity" : "Endurance needs work",
+        stat: avgSpeed ? `${avgSpeed.toFixed(2)} m/s` : "—",
+        context: avgSpeed ? `${((avgSpeed / (bestSpeed || avgSpeed)) * 100).toFixed(0)}% of your peak — higher = better stamina` : "",
+        trend: "stable",
+        bullets: [
+          "Average speed reflects your sustained effort, not just peak bursts",
+          avgSpeed && bestSpeed && avgSpeed / bestSpeed > 0.75 ? "Your stamina-to-sprint ratio is strong" : "Gap between avg and peak suggests quick fatigue — work on aerobic base",
+          "Target: maintain avg speed above 70% of your peak speed throughout a match",
+        ],
+      },
+    },
+    {
+      id: "symmetry", label: "AVG SYMMETRY", value: avgSym ? `${avgSym.toFixed(1)}%` : "—", sub: "balance score", color: "#06B6D4",
+      icon: "⚖️",
+      detail: {
+        headline: avgSym && avgSym >= 85 ? "Excellent bilateral balance" : avgSym && avgSym >= 70 ? "Minor imbalance detected" : "Imbalance flagged",
+        stat: avgSym ? `${avgSym.toFixed(1)}%` : "—",
+        context: avgSym ? `${avgSym >= 85 ? "Elite range (85–100%)" : avgSym >= 70 ? "Acceptable (70–84%)" : "Below target (<70%)"}` : "",
+        trend: symTrend,
+        bullets: [
+          "Symmetry measures how evenly you load your left vs right side during movement",
+          avgSym && avgSym < 80 ? "Low symmetry increases ACL and overuse injury risk by up to 3×" : "Good symmetry protects joints and improves change-of-direction efficiency",
+          symTrend === "improving" ? "Your balance is improving — keep up the unilateral work ↑" : symTrend === "declining" ? "Balance is declining — add single-leg stability exercises" : "Symmetry is holding steady",
+        ],
+      },
+    },
+    {
+      id: "sessions", label: "SESSIONS", value: String(sessions.length), sub: "total analyzed", color: "#A78BFA",
+      icon: "📹",
+      detail: {
+        headline: sessions.length >= 5 ? "Strong data history" : sessions.length >= 2 ? "Building your profile" : "Just getting started",
+        stat: `${sessions.length} session${sessions.length === 1 ? "" : "s"}`,
+        context: sessions.length >= 5 ? "Enough data for reliable trend analysis" : `${5 - sessions.length} more needed for full trend analysis`,
+        trend: "stable",
+        bullets: [
+          `Last session: ${sessions[0] ? new Date(sessions[0].date).toLocaleDateString("en-US", { month: "long", day: "numeric" }) : "—"}`,
+          sessions.length >= 3 ? "You have enough data to spot meaningful patterns" : "Upload more sessions to unlock AI trend insights",
+          "Consistency matters — aim to log at least 2 sessions per week",
+        ],
+      },
+    },
+    ...(latestRiskLabel ? [{
+      id: "risk", label: "LATEST RISK", value: latestRiskLabel, sub: "injury risk", color: latestRisk!.fill as string,
+      icon: "🩺",
+      detail: {
+        headline: latestRiskLabel === "Low" ? "You're in good shape" : latestRiskLabel === "Moderate" ? "Some areas need attention" : "Action required",
+        stat: latestRiskLabel,
+        context: `Risk score: ${Math.round(riskScore as number)}/100 · Based on movement asymmetry, speed spikes, and load`,
+        trend: "stable" as const,
+        bullets: [
+          latestRiskLabel === "Low" ? "Movement patterns suggest healthy load distribution" : latestRiskLabel === "Moderate" ? "One or more movement patterns show elevated stress" : "Multiple risk indicators detected — see AI Doctor below",
+          "Risk is re-assessed every session based on your latest movement data",
+          "Click AI Doctor below for a full breakdown by body area",
+        ],
+      },
+    }] : []),
+  ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      {/* Summary stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
-        {[
-          { label: "Best Speed", value: `${bestSpeed} m/s`, sub: "peak recorded", color: "#10B981" },
-          { label: "Avg Speed", value: `${avgSpeed} m/s`, sub: "across sessions", color: "#34D399" },
-          { label: "Avg Symmetry", value: `${avgSym}%`, sub: "balance score", color: "#06B6D4" },
-          { label: "Sessions", value: String(sessions.length), sub: "total analyzed", color: "#A78BFA" },
-          ...(latestRisk ? [{ label: "Latest Risk", value: latestRisk.fill === "#10B981" ? "Low" : latestRisk.fill === "#FBBF24" ? "Moderate" : "High", sub: "injury risk", color: latestRisk.fill as string }] : []),
-        ].map(d => (
-          <div key={d.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "18px 16px" }}>
-            <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{d.label}</p>
-            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: d.color, lineHeight: 1 }}>{d.value}</p>
-            <p style={{ fontSize: 11, color: text2, marginTop: 6 }}>{d.sub}</p>
-          </div>
-        ))}
+
+      {/* ── Flashcard stat row ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+        {flashCards.map(fc => {
+          const isOpen = expandedCard === fc.id;
+          return (
+            <div
+              key={fc.id}
+              onClick={() => setExpandedCard(isOpen ? null : fc.id)}
+              style={{
+                background: card, border: `1px solid ${isOpen ? fc.color : border}`,
+                borderRadius: 16, padding: "16px", cursor: "pointer",
+                transition: "all 0.2s", boxShadow: isOpen ? `0 0 20px ${fc.color}22` : "none",
+                position: "relative", overflow: "hidden",
+              }}
+            >
+              {/* Glow top bar */}
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: fc.color, opacity: isOpen ? 1 : 0, transition: "opacity 0.2s", borderRadius: "16px 16px 0 0" }} />
+
+              {!isOpen ? (
+                /* ── Front face ── */
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.07em" }}>{fc.label}</p>
+                    <span style={{ fontSize: 14 }}>{fc.icon}</span>
+                  </div>
+                  <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: fc.color, lineHeight: 1, marginBottom: 6 }}>{fc.value}</p>
+                  <p style={{ fontSize: 10, color: text2 }}>{fc.sub}</p>
+                  <p style={{ fontSize: 9, color: fc.color, marginTop: 8, fontWeight: 600, opacity: 0.7 }}>Tap for details →</p>
+                </>
+              ) : (
+                /* ── Back / expanded face ── */
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                    <p style={{ fontSize: 11, fontWeight: 800, color: fc.color }}>{fc.detail.headline}</p>
+                    <button onClick={e => { e.stopPropagation(); setExpandedCard(null); }} style={{ background: "none", border: "none", color: text2, cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+                  </div>
+                  <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 22, color: fc.color, lineHeight: 1, marginBottom: 4 }}>{fc.detail.stat}</p>
+                  {fc.detail.context && <p style={{ fontSize: 10, color: text2, marginBottom: 10, lineHeight: 1.4 }}>{fc.detail.context}</p>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {fc.detail.bullets.map((b, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                        <div style={{ width: 4, height: 4, borderRadius: "50%", background: fc.color, marginTop: 5, flexShrink: 0 }} />
+                        <p style={{ fontSize: 10, color: text1, lineHeight: 1.5, opacity: 0.85 }}>{b}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Speed trend */}
+      {/* ── Speed trend ── */}
       {speedData.length >= 2 && (
         <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 18, padding: "24px 24px 16px" }}>
           <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, marginBottom: 4 }}>Speed Over Time</p>
@@ -585,7 +774,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
         </div>
       )}
 
-      {/* Symmetry trend */}
+      {/* ── Symmetry trend ── */}
       {symmetryData.length >= 2 && (
         <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 18, padding: "24px 24px 16px" }}>
           <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, marginBottom: 4 }}>Body Symmetry</p>
@@ -609,7 +798,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
         </div>
       )}
 
-      {/* Risk trend */}
+      {/* ── Risk trend ── */}
       {riskData.length >= 2 && (
         <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 18, padding: "24px 24px 16px" }}>
           <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, marginBottom: 4 }}>Injury Risk Score</p>
@@ -620,16 +809,13 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
               <XAxis dataKey="label" tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis domain={[0, 100]} tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
-              {riskData.map((d, i) => null)}
               <Bar dataKey="risk" name="Risk Score" radius={[6, 6, 0, 0]}>
-                {riskData.map((d, i) => (
-                  <rect key={i} fill={d.fill} />
-                ))}
+                {riskData.map((d, i) => <rect key={i} fill={d.fill} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
           <div style={{ display: "flex", gap: 16, marginTop: 12, justifyContent: "center" }}>
-            {[["#10B981", "Low"], ["#FBBF24", "Moderate"], ["#F87171", "High"]].map(([c, l]) => (
+            {[["#10B981","Low"],["#FBBF24","Moderate"],["#F87171","High"]].map(([c,l]) => (
               <div key={l} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <div style={{ width: 10, height: 10, borderRadius: 3, background: c }} />
                 <span style={{ fontSize: 11, color: text2, fontWeight: 600 }}>{l}</span>
@@ -639,9 +825,159 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
         </div>
       )}
 
+      {/* ── AI Coach ── */}
+      <div style={{ background: isDark ? "rgba(5,150,105,0.06)" : "#F0FDF9", border: `1px solid ${isDark ? "rgba(5,150,105,0.2)" : "rgba(5,150,105,0.2)"}`, borderRadius: 18, overflow: "hidden" }}>
+        <button
+          onClick={() => setCoachOpen(p => !p)}
+          style={{ width: "100%", background: "none", border: "none", padding: "20px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 14px rgba(5,150,105,0.35)" }}>
+              <span style={{ fontSize: 22 }}>🏅</span>
+            </div>
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 15, color: text1, marginBottom: 2 }}>AI Performance Coach</p>
+              <p style={{ fontSize: 12, color: text2 }}>Personalized feedback based on your movement data</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(5,150,105,0.15)", color: "#10B981", borderRadius: 100, padding: "3px 10px", border: "1px solid rgba(5,150,105,0.25)" }}>{coachLines.length} insights</span>
+            <span style={{ color: text2, fontSize: 14, transform: coachOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+          </div>
+        </button>
+
+        {coachOpen && (
+          <div style={{ padding: "0 24px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ height: 1, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(5,150,105,0.12)", marginBottom: 4 }} />
+            {coachLines.map((line, i) => (
+              <div key={i} style={{ background: card, borderRadius: 14, padding: "16px 18px", border: `1px solid ${isDark ? "rgba(255,255,255,0.07)" : "rgba(5,150,105,0.1)"}`, display: "flex", gap: 14, alignItems: "flex-start" }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${line.color}18`, border: `1px solid ${line.color}30`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontSize: 18 }}>{line.icon}</span>
+                </div>
+                <div>
+                  <p style={{ fontWeight: 800, fontSize: 13, color: line.color, marginBottom: 5 }}>{line.title}</p>
+                  <p style={{ fontSize: 13, color: text1, lineHeight: 1.6, opacity: 0.85 }}>{line.body}</p>
+                </div>
+              </div>
+            ))}
+            <div style={{ background: card, borderRadius: 14, padding: "14px 18px", border: `1px solid ${isDark ? "rgba(255,255,255,0.05)" : "rgba(5,150,105,0.08)"}`, marginTop: 4 }}>
+              <p style={{ fontSize: 11, color: text2, lineHeight: 1.6, textAlign: "center" }}>
+                ⚠️ This is AI-generated coaching guidance based on biomechanical data. Always consult a qualified coach before making major training changes.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── AI Doctor ── */}
+      <div style={{ background: isDark ? "rgba(239,68,68,0.04)" : "#FFF8F8", border: `1px solid ${isDark ? "rgba(239,68,68,0.18)" : "rgba(239,68,68,0.15)"}`, borderRadius: 18, overflow: "hidden" }}>
+        <button
+          onClick={() => setDoctorOpen(p => !p)}
+          style={{ width: "100%", background: "none", border: "none", padding: "20px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", textAlign: "left" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: "linear-gradient(135deg,#DC2626,#F87171)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 14px rgba(220,38,38,0.25)" }}>
+              <span style={{ fontSize: 22 }}>🩺</span>
+            </div>
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 15, color: text1, marginBottom: 2 }}>AI Injury Risk Doctor</p>
+              <p style={{ fontSize: 12, color: text2 }}>Personalized injury risk analysis by body area</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, background: `${doctorSummaryColor}18`, color: doctorSummaryColor, borderRadius: 100, padding: "3px 10px", border: `1px solid ${doctorSummaryColor}30` }}>{doctorSummaryLabel}</span>
+            <span style={{ color: text2, fontSize: 14, transform: doctorOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+          </div>
+        </button>
+
+        {doctorOpen && (
+          <div style={{ padding: "0 24px 24px" }}>
+            <div style={{ height: 1, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(239,68,68,0.1)", marginBottom: 16 }} />
+
+            {/* Summary bar */}
+            <div style={{ background: card, borderRadius: 14, padding: "14px 18px", border: `1px solid ${isDark ? "rgba(255,255,255,0.07)" : "rgba(239,68,68,0.1)"}`, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: doctorSummaryColor, flexShrink: 0, boxShadow: `0 0 8px ${doctorSummaryColor}` }} />
+              <p style={{ fontSize: 13, color: text1, fontWeight: 700 }}>
+                Overall status: <span style={{ color: doctorSummaryColor }}>{doctorSummaryLabel}</span>
+                <span style={{ fontWeight: 400, color: text2, fontSize: 12 }}> · Based on {sessions.length} session{sessions.length !== 1 ? "s" : ""} of movement data</span>
+              </p>
+            </div>
+
+            {/* Body area cards */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {doctorAreas.map((area, i) => (
+                <BodyAreaCard key={i} area={area} isDark={isDark} card={card} border={border} text1={text1} text2={text2} />
+              ))}
+            </div>
+
+            {/* Prevention note */}
+            <div style={{ background: isDark ? "rgba(5,150,105,0.06)" : "#F0FDF9", borderRadius: 14, padding: "16px 18px", border: `1px solid rgba(5,150,105,0.15)`, marginTop: 16 }}>
+              <p style={{ fontWeight: 800, fontSize: 12, color: "#10B981", marginBottom: 8 }}>🛡️ Prevention Protocol</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[
+                  "Dynamic warm-up every session: leg swings, hip circles, lateral shuffles (8 min minimum)",
+                  "Cool down with static stretching: hip flexors, hamstrings, calves (10 min)",
+                  "Sleep 8–9 hours — most soft tissue recovery happens in deep sleep",
+                  "Hydrate: 500 ml water 2h before training, sip throughout, 500 ml after",
+                  "If any area feels sharp or painful — stop immediately and consult a physio",
+                ].map((tip, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <span style={{ color: "#10B981", fontWeight: 700, fontSize: 12, flexShrink: 0 }}>{i+1}.</span>
+                    <p style={{ fontSize: 12, color: text1, lineHeight: 1.5, opacity: 0.8 }}>{tip}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, padding: "12px 16px", borderRadius: 12, background: isDark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)", border: `1px solid ${border}` }}>
+              <p style={{ fontSize: 11, color: text2, lineHeight: 1.6, textAlign: "center" }}>
+                ⚕️ This analysis is based on biomechanical data and does not replace a medical professional. Consult a licensed sports physio or doctor for any persistent pain or injury concerns.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
       {sessions.length === 1 && (
         <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "20px 24px", textAlign: "center" }}>
           <p style={{ color: text2, fontSize: 14 }}>Add more sessions to see your progress charts and trends.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Body Area Card (expandable, used inside AI Doctor) ─────────────────────────
+function BodyAreaCard({ area, isDark, card, border, text1, text2 }: {
+  area: { area: string; risk: string; pct: number; color: string; advice: string };
+  isDark: boolean; card: string; border: string; text1: string; text2: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ background: card, borderRadius: 14, border: `1px solid ${open ? area.color + "50" : border}`, overflow: "hidden", transition: "border-color 0.2s" }}>
+      <button
+        onClick={() => setOpen(p => !p)}
+        style={{ width: "100%", background: "none", border: "none", padding: "14px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, textAlign: "left" }}
+      >
+        {/* Risk dot */}
+        <div style={{ width: 10, height: 10, borderRadius: "50%", background: area.color, flexShrink: 0, boxShadow: `0 0 6px ${area.color}80` }} />
+        {/* Label */}
+        <span style={{ fontSize: 13, fontWeight: 700, color: text1, flex: 1 }}>{area.area}</span>
+        {/* Bar */}
+        <div style={{ width: 80, height: 5, background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)", borderRadius: 100, overflow: "hidden", flexShrink: 0 }}>
+          <div style={{ width: `${area.pct}%`, height: "100%", background: area.color, borderRadius: 100 }} />
+        </div>
+        {/* Badge */}
+        <span style={{ fontSize: 10, fontWeight: 800, color: area.color, background: `${area.color}15`, borderRadius: 100, padding: "3px 9px", border: `1px solid ${area.color}30`, flexShrink: 0 }}>{area.risk}</span>
+        {/* Chevron */}
+        <span style={{ color: text2, fontSize: 11, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }}>▼</span>
+      </button>
+      {open && (
+        <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)"}` }}>
+          <div style={{ paddingTop: 12, display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ width: 3, borderRadius: 100, background: area.color, alignSelf: "stretch", flexShrink: 0, minHeight: 40 }} />
+            <p style={{ fontSize: 13, color: text1, lineHeight: 1.65, opacity: 0.85 }}>{area.advice}</p>
+          </div>
         </div>
       )}
     </div>
@@ -1375,6 +1711,7 @@ export default function ProfilePage() {
                     { id: "performance", label: "Performance", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> },
                     { id: "progress",    label: "Progress",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
                     { id: "explore",     label: "Explore",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> },
+                    { id: "messages",    label: "Messages",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
                     { id: "settings",    label: "Profile",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
                   ]).map((t, i) => (
                     <button
