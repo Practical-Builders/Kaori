@@ -100,7 +100,7 @@ export default function LoginPage() {
         saveUsers([...users, { email: googleEmail, name: googleName, salt: "", hash: "google" }]);
       }
       sessionStorage.setItem(AUTHED_KEY, googleEmail);
-      router.replace("/profile");
+      window.location.href = "/profile";
     } catch {
       setError("Google sign-in failed. Please try again.");
     }
@@ -133,19 +133,24 @@ export default function LoginPage() {
         const salt = generateSalt();
         const hash = await hashPassword(password, salt);
         saveUsers([...users, { email: email.toLowerCase(), name: name.trim(), salt, hash }]);
-        sessionStorage.setItem(AUTHED_KEY, email.toLowerCase());
+        const normalizedEmail = email.toLowerCase();
+        sessionStorage.setItem(AUTHED_KEY, normalizedEmail);
         if (role) {
-          const existing = JSON.parse(localStorage.getItem("kaori_profile") ?? "{}");
-          localStorage.setItem("kaori_profile", JSON.stringify({ ...existing, accountType: role }));
+          const safe = normalizedEmail.replace(/[^a-zA-Z0-9@._-]/g, "_");
+          const profileKey = `kaori_profile_${safe}`;
+          const existing = JSON.parse(localStorage.getItem(profileKey) ?? "{}");
+          localStorage.setItem(profileKey, JSON.stringify({ ...existing, accountType: role, name: name.trim(), email: normalizedEmail }));
         }
-        router.replace("/profile");
+        // Full reload so ProfileProvider re-mounts and reads the correct namespace
+        window.location.href = "/profile";
       } else {
         const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
         if (!user) { setError("No account found with this email."); return; }
         const hash = await hashPassword(password, user.salt);
         if (hash !== user.hash) { setError("Incorrect password."); return; }
         sessionStorage.setItem(AUTHED_KEY, email.toLowerCase());
-        router.replace("/profile");
+        // Full reload so ProfileProvider re-mounts and reads the correct namespace
+        window.location.href = "/profile";
       }
     } catch { setError("Something went wrong. Please try again."); }
     finally { setLoading(false); }
