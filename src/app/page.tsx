@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 export default function Landing() {
   const { profileComplete } = useProfile();
   const [mounted, setMounted] = useState(false);
+  // demo is now a dedicated route /demo
   useEffect(() => { setMounted(true); }, []);
 
   return (
@@ -123,6 +124,14 @@ export default function Landing() {
                   }}>
                     Add Video
                   </Link>
+                  <Link href="/demo" style={{
+                    display: "inline-flex", alignItems: "center", gap: 10, padding: "16px 32px", borderRadius: 10,
+                    background: "rgba(255,255,255,0.06)", color: "white", fontWeight: 600, fontSize: 16,
+                    border: "1px solid rgba(255,255,255,0.14)", textDecoration: "none",
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Watch Demo
+                  </Link>
                 </>
               ) : (
                 <>
@@ -132,6 +141,14 @@ export default function Landing() {
                     textDecoration: "none", letterSpacing: "0.01em",
                   }}>
                     Create Account
+                  </Link>
+                  <Link href="/demo" style={{
+                    display: "inline-flex", alignItems: "center", gap: 10, padding: "16px 32px", borderRadius: 10,
+                    background: "rgba(255,255,255,0.06)", color: "white", fontWeight: 600, fontSize: 16,
+                    border: "1px solid rgba(255,255,255,0.14)", textDecoration: "none",
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Watch Demo
                   </Link>
                 </>
               )}
@@ -241,6 +258,7 @@ export default function Landing() {
         <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 14, color: "rgba(255,255,255,0.3)", letterSpacing: "0.1em" }}>KICKIQ</span>
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.2)" }}>For educational and training purposes only. Not a medical diagnostic tool.</p>
       </footer>
+
     </main>
   );
 }

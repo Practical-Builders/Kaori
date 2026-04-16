@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProfile, AthleteProfile, AnalysisSession } from "@/contexts/ProfileContext";
+import { getVideo, getPoseFrames, saveVideo, PoseData } from "@/lib/videoStorage";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
@@ -127,13 +128,359 @@ const SESSION_THUMBS = [
 
 // ── Explore content ───────────────────────────────────────────────────────────
 const EXPLORE = [
-  { cat: "Training", title: "5 Speed Drills for Midfielders", source: "UEFA", url: "https://www.uefa.com/nationalassociations/uefaregulations/technicalreports/", img: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Fitness",  title: "Injury Prevention for Young Athletes", source: "FIFA", url: "https://www.fifa.com/technical/football-medicine/", img: "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Tactics",  title: "Pressing Triggers & High Press", source: "FC Barcelona", url: "https://www.fcbarcelona.com/en/football/first-team", img: "https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Nutrition","title": "Fueling Performance: Pre-Match Diet", source: "Sports Science", url: "https://www.gssiweb.org/sports-science-exchange/article/sse-180-fueling-for-sport", img: "https://images.unsplash.com/photo-1547347298-4074fc3086f0?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Recruiting","title":"How College Coaches Find Prospects", source: "NSCAA", url: "https://www.nscaa.com/resources/college-recruiting", img: "https://images.unsplash.com/photo-1560272564-c83b66b1ad12?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Training", title: "Ball Mastery: 15-Min Daily Routine", source: "Coerver", url: "https://www.coerver.com/", img: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=400&q=80" },
+  { cat: "Training",   title: "5 Speed Drills for Midfielders",        source: "UEFA",          url: "https://www.uefa.com/nationalassociations/uefaregulations/technicalreports/", img: "https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Fitness",    title: "Injury Prevention for Young Athletes",   source: "FIFA",          url: "https://www.fifa.com/technical/football-medicine/",                          img: "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Tactics",    title: "Pressing Triggers & High Press",         source: "FC Barcelona",  url: "https://www.fcbarcelona.com/en/football/first-team",                        img: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Nutrition",  title: "Fueling Performance: Pre-Match Diet",    source: "Sports Science",url: "https://www.gssiweb.org/sports-science-exchange/article/sse-180-fueling-for-sport", img: "https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Recruiting", title: "How College Coaches Find Prospects",     source: "NSCAA",         url: "https://www.nscaa.com/resources/college-recruiting",                        img: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Training",   title: "Ball Mastery: 15-Min Daily Routine",     source: "Coerver",       url: "https://www.coerver.com/",                                                  img: "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=600&q=80" },
 ];
+
+// ── Skeleton drawing helpers (same coordinate system as analyze page) ─────────
+const SKEL_LM: Record<string, number> = {
+  nose: 0, lShoulder: 11, rShoulder: 12,
+  lElbow: 13, rElbow: 14, lWrist: 15, rWrist: 16,
+  lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28,
+};
+const SKEL_BONES: [string, string][] = [
+  ["nose","neck"],
+  ["neck","lShoulder"],["neck","rShoulder"],
+  ["lShoulder","lElbow"],["lElbow","lWrist"],
+  ["rShoulder","rElbow"],["rElbow","rWrist"],
+  ["neck","lHip"],["neck","rHip"],
+  ["lHip","rHip"],
+  ["lHip","lKnee"],["lKnee","lAnkle"],
+  ["rHip","rKnee"],["rKnee","rAnkle"],
+];
+
+function skelLmToCanvas(lx: number, ly: number, cW: number, cH: number, vW: number, vH: number) {
+  const va = vW / vH, ca = cW / cH;
+  let rW: number, rH: number, ox: number, oy: number;
+  if (va > ca) { rW = cW; rH = cW / va; ox = 0;        oy = (cH - rH) / 2; }
+  else          { rH = cH; rW = cH * va; oy = 0;        ox = (cW - rW) / 2; }
+  return { x: ox + (lx / vW) * rW, y: oy + (ly / vH) * rH };
+}
+
+function buildJoints(
+  lms: any[], cW: number, cH: number, vW: number, vH: number,
+): Record<string, { x: number; y: number; z: number }> | null {
+  if (!lms || lms.length < 29) return null;
+  const j: Record<string, { x: number; y: number; z: number }> = {};
+  for (const [name, idx] of Object.entries(SKEL_LM)) {
+    const lm = lms[idx];
+    if (!lm || (lm.visibility ?? 1) < 0.12) continue;
+    const { x, y } = skelLmToCanvas(lm.x, lm.y, cW, cH, vW, vH);
+    j[name] = { x, y, z: lm.z ?? 0 };
+  }
+  if (!j.nose || (!j.lHip && !j.rHip)) return null;
+  if (j.lShoulder && j.rShoulder)
+    j.neck = { x: (j.lShoulder.x + j.rShoulder.x) / 2, y: (j.lShoulder.y + j.rShoulder.y) / 2, z: ((j.lShoulder.z ?? 0) + (j.rShoulder.z ?? 0)) / 2 };
+  return j;
+}
+
+function drawSkeleton3D(
+  ctx: CanvasRenderingContext2D,
+  j: Record<string, { x: number; y: number; z: number }>,
+  color: string,
+) {
+  const zA = (name: string) => Math.max(0.4, Math.min(1, 0.72 + (-(j[name]?.z ?? 0)) * 1.4));
+
+  SKEL_BONES.forEach(([a, b]) => {
+    if (!j[a] || !j[b]) return;
+    const alpha = (zA(a) + zA(b)) / 2;
+    const depth = ((j[a].z) + (j[b].z)) / 2;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color; ctx.shadowBlur = 10 * alpha;
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.5, 4 + (-depth) * 5);
+    ctx.beginPath(); ctx.moveTo(j[a].x, j[a].y); ctx.lineTo(j[b].x, j[b].y); ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+
+  // Draw joints back-to-front (higher z = further away, lower z = closer)
+  const sorted = Object.entries(j)
+    .filter(([n]) => n !== "neck")
+    .sort(([, a], [, b]) => b.z - a.z);
+
+  sorted.forEach(([name, pos]) => {
+    const alpha = zA(name);
+    const r = (name === "nose" ? 8 : 5) + (-(pos.z)) * 4;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color; ctx.shadowBlur = 8 * alpha;
+    ctx.beginPath(); ctx.arc(pos.x, pos.y, Math.max(2, r), 0, Math.PI * 2);
+    ctx.fillStyle = name === "nose" ? "rgba(255,255,255,0.95)" : color;
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+}
+
+// ── Session Video Modal ────────────────────────────────────────────────────────
+function SessionVideoModal({ session, onClose }: { session: AnalysisSession; onClose: () => void }) {
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef    = useRef<number>(0);
+  const trailRef  = useRef<Array<{ x: number; y: number }>>([]);
+  const [videoUrl,  setVideoUrl]  = useState<string | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [poseData,  setPoseData]  = useState<PoseData | null>(null);
+  const [hudVisible, setHudVisible] = useState(false);
+
+  // Load video + pose frames from IndexedDB
+  useEffect(() => {
+    let url = "";
+    setLoading(true);
+    trailRef.current = [];
+    Promise.all([
+      getVideo(session.id),
+      getPoseFrames(session.id),
+    ]).then(([file, pose]) => {
+      if (file) { url = URL.createObjectURL(file); setVideoUrl(url); }
+      if (pose) setPoseData(pose);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [session.id]);
+
+  // File picker fallback — user can locate their video manually
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setVideoUrl(url);
+    saveVideo(session.id, f).catch(() => {});
+  }
+
+  // Draw skeleton + overlay every frame
+  const draw = useCallback(() => {
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) { rafRef.current = requestAnimationFrame(draw); return; }
+
+    // Sync canvas pixel resolution to its CSS display size
+    const dW = canvas.offsetWidth, dH = canvas.offsetHeight;
+    if (dW > 0 && (canvas.width !== dW || canvas.height !== dH)) {
+      canvas.width = dW; canvas.height = dH;
+    }
+    const cW = canvas.width, cH = canvas.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || !cW || !cH) { rafRef.current = requestAnimationFrame(draw); return; }
+    ctx.clearRect(0, 0, cW, cH);
+
+    const tMs = video.currentTime * 1000;
+
+    // ── If we have real pose data, draw full 3D skeleton + trail ─────────────
+    if (poseData && poseData.frames.length > 0) {
+      const { frames, metadata: { width: vW, height: vH } } = poseData;
+
+      // Find closest frame by timestamp
+      let best = 0, bestDiff = Infinity;
+      for (let i = 0; i < frames.length; i++) {
+        const d = Math.abs(frames[i].timestamp_ms - tMs);
+        if (d < bestDiff) { bestDiff = d; best = i; }
+      }
+      const lms    = frames[best]?.landmarks ?? null;
+      const joints = lms ? buildJoints(lms, cW, cH, vW, vH) : null;
+
+      if (joints) {
+        const lh = joints.lHip, rh = joints.rHip;
+        const cx = lh && rh ? (lh.x + rh.x) / 2 : (lh ?? rh)!.x;
+        const cy = lh && rh ? (lh.y + rh.y) / 2 : (lh ?? rh)!.y;
+
+        // Motion trail — only accumulate while playing
+        if (!video.paused && !video.ended) {
+          trailRef.current.push({ x: cx, y: cy });
+          if (trailRef.current.length > 60) trailRef.current.shift();
+        }
+        const trail = trailRef.current;
+        if (trail.length > 1) {
+          ctx.lineCap = "round";
+          for (let i = 1; i < trail.length; i++) {
+            const t = i / trail.length;
+            ctx.beginPath();
+            ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+            ctx.lineTo(trail[i].x, trail[i].y);
+            ctx.strokeStyle = "#34D399";
+            ctx.lineWidth   = 1.5 + t * 3.5;
+            ctx.globalAlpha = t * 0.55;
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+        }
+
+        // Real 3D skeleton
+        drawSkeleton3D(ctx, joints, "#34D399");
+
+        // Speed HUD above head
+        const headX = joints.nose?.x ?? cx;
+        const headY = joints.nose?.y ?? cy - cH * 0.2;
+        const hudY  = headY - 34;
+        const spd   = session.peakSpeedMs ? `${session.peakSpeedMs.toFixed(1)} m/s` : "— m/s";
+        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+        ctx.fillStyle  = "rgba(0,0,0,0.75)";
+        ctx.beginPath();
+        (ctx as any).roundRect?.(headX - 44, hudY - 13, 88, 26, 7) ?? ctx.rect(headX - 44, hudY - 13, 88, 26);
+        ctx.fill();
+        ctx.strokeStyle = "#34D399"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle   = "#34D399"; ctx.font = "bold 12px monospace";
+        ctx.textAlign   = "center";  ctx.textBaseline = "middle";
+        ctx.fillText(spd, headX, hudY);
+        ctx.beginPath();
+        ctx.moveTo(headX, hudY + 13); ctx.lineTo(headX, headY - 10);
+        ctx.strokeStyle = "rgba(52,211,153,0.4)"; ctx.lineWidth = 1; ctx.stroke();
+      }
+    } else if (session.bboxTrack && video.duration) {
+      // Fallback: bounding box only (no pose data)
+      const track  = session.bboxTrack;
+      const vW     = session.bboxMeta?.width  ?? 1;
+      const vH     = session.bboxMeta?.height ?? 1;
+      const sc     = Math.min(cW / vW, cH / vH);
+      const padX   = (cW - vW * sc) / 2;
+      const padY   = (cH - vH * sc) / 2;
+      const fi     = Math.min(track.length - 1, Math.floor((video.currentTime / video.duration) * track.length));
+      const box    = track[fi];
+      if (box) {
+        const tlx = padX + box.x0 * sc, tly = padY + box.y0 * sc;
+        const brx = padX + box.x1 * sc, bry = padY + box.y1 * sc;
+        const bW  = brx - tlx, bH = bry - tly;
+        const cl  = Math.min(bW, bH) * 0.18;
+        ctx.shadowColor = "#34D399"; ctx.shadowBlur = 14;
+        ctx.strokeStyle = "#34D399"; ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(tlx,      tly + cl); ctx.lineTo(tlx,      tly); ctx.lineTo(tlx + cl, tly);
+        ctx.moveTo(brx - cl, tly);      ctx.lineTo(brx,      tly); ctx.lineTo(brx,      tly + cl);
+        ctx.moveTo(brx,      bry - cl); ctx.lineTo(brx,      bry); ctx.lineTo(brx - cl, bry);
+        ctx.moveTo(tlx + cl, bry);      ctx.lineTo(tlx,      bry); ctx.lineTo(tlx,      bry - cl);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle  = "rgba(52,211,153,0.05)";
+        ctx.fillRect(tlx, tly, bW, bH);
+        ctx.fillStyle = "#34D399"; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
+        ctx.fillText("ATHLETE", tlx + 4, tly - 5);
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(draw);
+  }, [session, poseData]);
+
+  useEffect(() => {
+    rafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [draw, videoUrl]);
+
+  // Metrics for HUD popup
+  const riskColor = (r?: string) =>
+    r === "low" ? "#10B981" : r === "moderate" ? "#F59E0B" : r === "high" ? "#EF4444" : "#6B7280";
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(10px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}
+      onClick={onClose}
+    >
+      <div
+        style={{ position: "relative", width: "min(92vw,900px)", background: "#0A1410", borderRadius: 20, overflow: "hidden", boxShadow: "0 40px 80px rgba(0,0,0,0.7)", border: "1px solid rgba(52,211,153,0.18)" }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div>
+            <p style={{ color: "white", fontWeight: 800, fontSize: 14, fontFamily: "var(--font-display)" }}>{session.videoName}</p>
+            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{new Date(session.date).toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</p>
+          </div>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+
+        {/* Video + canvas */}
+        <div style={{ position: "relative", background: "black", lineHeight: 0, minHeight: loading ? 320 : undefined }}>
+          {loading && (
+            <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 32, height: 32, border: "3px solid rgba(52,211,153,0.2)", borderTopColor: "#34D399", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
+                <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>Loading…</span>
+              </div>
+            </div>
+          )}
+          {!loading && !videoUrl && (
+            <div style={{ height: 320, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+              <span style={{ fontSize: 40 }}>🎬</span>
+              <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, textAlign: "center", maxWidth: 280 }}>
+                Video file not stored yet.<br/>Re-analyze to auto-save, or locate it manually:
+              </span>
+              <label style={{ cursor: "pointer", padding: "8px 18px", background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.35)", borderRadius: 8, color: "#34D399", fontSize: 12, fontWeight: 700 }}>
+                Select video file
+                <input type="file" accept="video/*" style={{ display: "none" }} onChange={handleFilePick} />
+              </label>
+            </div>
+          )}
+          {videoUrl && (
+            <>
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls
+                playsInline
+                style={{ width: "100%", maxHeight: "62vh", display: "block" }}
+              />
+              {/* Canvas overlay — same size as video via CSS; intrinsic size synced in draw loop */}
+              <canvas
+                ref={canvasRef}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+              />
+            </>
+          )}
+        </div>
+
+        {/* Footer quick stats + skeleton indicator */}
+        <div style={{ padding: "12px 18px", display: "flex", gap: 20, flexWrap: "wrap", borderTop: "1px solid rgba(255,255,255,0.06)", alignItems: "center" }}>
+          {session.peakSpeedMs   && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>PEAK SPEED</p><p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{session.peakSpeedMs.toFixed(1)} <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>m/s</span></p></div>}
+          {session.symmetryScore && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>SYMMETRY</p><p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{session.symmetryScore.toFixed(0)} <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>%</span></p></div>}
+          {session.strideCount   && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>STRIDES</p><p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{session.strideCount}</p></div>}
+          {session.overallRisk   && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>RISK</p><p style={{ fontWeight: 800, fontSize: 15, color: riskColor(session.overallRisk), textTransform: "capitalize" }}>{session.overallRisk}</p></div>}
+          <button onClick={() => setHudVisible(v => !v)} style={{ marginLeft: "auto", padding: "6px 14px", borderRadius: 8, background: hudVisible ? "rgba(52,211,153,0.2)" : "rgba(52,211,153,0.08)", border: `1px solid ${hudVisible ? "rgba(52,211,153,0.5)" : "rgba(52,211,153,0.2)"}`, color: "#34D399", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            {hudVisible ? "Hide Stats" : "Live Stats"}
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: poseData ? "#34D399" : session.bboxTrack ? "#F59E0B" : "#4B5563" }} />
+            <span style={{ color: "rgba(255,255,255,0.35)", fontSize: 10 }}>
+              {poseData ? "3D skeleton active" : session.bboxTrack ? "Tracking active" : "Re-analyze to enable skeleton"}
+            </span>
+          </div>
+        </div>
+      </div>
+      {hudVisible && (
+        <div style={{ background: "rgba(6,14,10,0.98)", borderTop: "1px solid rgba(52,211,153,0.25)", padding: "14px 18px" }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>PEAK SPEED</p>
+              <p style={{ color: "white", fontWeight: 900, fontSize: 24, lineHeight: 1 }}>{session.peakSpeedMs?.toFixed(1) ?? "—"}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>m/s</span></p>
+            </div>
+            <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>SYMMETRY SCORE</p>
+              <p style={{ color: "white", fontWeight: 900, fontSize: 24, lineHeight: 1 }}>{session.symmetryScore?.toFixed(0) ?? "—"}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>%</span></p>
+            </div>
+            <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>INJURY RISK</p>
+              <p style={{ fontWeight: 900, fontSize: 20, color: riskColor(session.overallRisk), textTransform: "capitalize" }}>{session.overallRisk ?? "—"}</p>
+              {(session as any).injuryRisk?.risk_categories && (
+                <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                  {Object.entries((session as any).injuryRisk.risk_categories).map(([k, v]: [string, any]) => (
+                    <span key={k} style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 100, background: `${riskColor(v?.level)}18`, color: riskColor(v?.level), textTransform: "capitalize" }}>{k.replace(/_/g," ")}: {v?.level}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            {session.strideCount && (
+              <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>STRIDES</p>
+                <p style={{ color: "white", fontWeight: 900, fontSize: 24, lineHeight: 1 }}>{session.strideCount}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
 
 // ── Progress Charts Tab ────────────────────────────────────────────────────────
 function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark: boolean }) {
@@ -202,7 +549,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* Summary stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
         {[
           { label: "Best Speed", value: `${bestSpeed} m/s`, sub: "peak recorded", color: "#10B981" },
           { label: "Avg Speed", value: `${avgSpeed} m/s`, sub: "across sessions", color: "#34D399" },
@@ -212,7 +559,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
         ].map(d => (
           <div key={d.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "18px 16px" }}>
             <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{d.label}</p>
-            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: d.color, lineHeight: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.value}</p>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: d.color, lineHeight: 1 }}>{d.value}</p>
             <p style={{ fontSize: 11, color: text2, marginTop: 6 }}>{d.sub}</p>
           </div>
         ))}
@@ -857,6 +1204,8 @@ export default function ProfilePage() {
   const [showAllInsights, setShowAllInsights] = useState(false);
   const [isDark,     setIsDark]     = useState(true);
   const [meOpen,     setMeOpen]     = useState(false);
+  const [videoModal, setVideoModal] = useState<AnalysisSession | null>(null);
+  const [topMomentExpanded, setTopMomentExpanded] = useState<number | null>(null);
   const [watchlist,  setWatchlist]  = useState<string[]>([]);
   const [activeMsgConvId, setActiveMsgConvId] = useState<string | null>(null);
   const [msgOpenWithAthlete, setMsgOpenWithAthlete] = useState<string | null>(null);
@@ -957,6 +1306,7 @@ export default function ProfilePage() {
   return (
     <main style={{ minHeight: "100vh", background: bg, fontFamily: "var(--font-body)", transition: "background 0.3s" }}>
       {editOpen && <EditModal onClose={() => setEditOpen(false)} />}
+      {videoModal && <SessionVideoModal session={videoModal} onClose={() => setVideoModal(null)} />}
       {compareOpen && compareIds.length === 2 && (
         <CompareModal sessions={sessions} compareIds={compareIds} onClose={() => setCompareOpen(false)} />
       )}
@@ -1101,7 +1451,7 @@ export default function ProfilePage() {
                   {/* ── HERO VIDEO ── */}
                   <div style={{ marginBottom: 24 }}>
                     <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Hero Videos</p>
-                    <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", height: 360, background: "#071A10", cursor: "pointer" }}>
+                    <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", height: 360, background: "#071A10", cursor: "pointer" }} onClick={() => setVideoModal(sessions[0])}>
                       <img src={sessions[0].thumbnail || SESSION_THUMBS[0]} alt="" crossOrigin={sessions[0].thumbnail ? undefined : "anonymous"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.6 }} />
                       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(160deg, rgba(3,12,7,0.7) 0%, rgba(3,12,7,0.25) 50%, rgba(3,12,7,0.88) 100%)" }} />
                       {/* Session label — top left */}
@@ -1179,48 +1529,91 @@ export default function ProfilePage() {
                   {topMoments.length > 0 && (
                     <div style={{ marginBottom: 24 }}>
                       <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Top Moments</p>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
                         {topMoments.slice(0, 3).map((h, i) => {
-                          const meta = [{ icon: "bolt", color: "#10B981" }, { icon: "sprint", color: "#A78BFA" }, { icon: "agility", color: "#06B6D4" }][i] ?? { icon: "bolt", color: "#10B981" };
+                          const meta = [
+                            { icon: "bolt",    color: "#10B981",
+                              explain: "Your fastest recorded sprint in this clip. This reflects explosive anaerobic power and fast-twitch muscle activation. Elite female amateur players average ~8–9 m/s; top professionals reach 11+ m/s.",
+                              barLabel: (v: number) => v < 5 ? "Developing" : v < 7 ? "Average" : v < 8.5 ? "Strong" : "Elite",
+                              barColor: (v: number) => v < 5 ? "#6B7280" : v < 7 ? "#F59E0B" : v < 8.5 ? "#10B981" : "#34D399",
+                              barRatio: (v: number) => Math.min(1, v / 10),
+                              barMin: "0 m/s", barMax: "10+ m/s",
+                            },
+                            { icon: "sprint",  color: "#A78BFA",
+                              explain: "Peak torque-to-speed ratio during the push-off phase of your stride. Accounts for your age, height and weight. Higher values mean your legs generate more force per stride — key for acceleration and jumping.",
+                              barLabel: (v: number) => v < 0.3 ? "Light" : v < 0.55 ? "Moderate" : v < 0.8 ? "Strong" : "Max Power",
+                              barColor: (v: number) => v < 0.3 ? "#10B981" : v < 0.55 ? "#F59E0B" : v < 0.8 ? "#F97316" : "#EF4444",
+                              barRatio: (v: number) => v,
+                              barMin: "Light", barMax: "Max",
+                              isPower: true,
+                            },
+                            { icon: "agility", color: "#06B6D4",
+                              explain: "Peak lateral acceleration recorded during a direction change. This measures how quickly you can redirect momentum — a key skill for beating defenders and tracking attackers. 10–15 m/s² is good; 18+ is elite.",
+                              barLabel: (v: number) => v < 6 ? "Low" : v < 10 ? "Moderate" : v < 15 ? "Sharp" : "Elite",
+                              barColor: (v: number) => v < 6 ? "#6B7280" : v < 10 ? "#F59E0B" : v < 15 ? "#10B981" : "#06B6D4",
+                              barRatio: (v: number) => Math.min(1, v / 20),
+                              barMin: "0 m/s²", barMax: "20+ m/s²",
+                            },
+                          ][i] ?? { icon: "bolt", color: "#10B981", explain: "", barLabel: () => "", barColor: () => "#10B981", barRatio: () => 0, barMin: "", barMax: "" };
+                          const isOpen = topMomentExpanded === i;
+                          const rawNum = parseFloat(h.value ?? "") || 0;
+
+                          // For power bar, compute normalized ratio
+                          let barRatioVal = 0;
+                          if ((meta as any).isPower) {
+                            const age2 = parseInt(profile.age || "20");
+                            const ht2  = parseFloat((profile as any).heightCm || "170");
+                            const wt2  = parseFloat((profile as any).weightKg || "70");
+                            const af   = age2 < 10 ? 0.50 : age2 < 14 ? 0.65 : age2 < 18 ? 0.80 : age2 < 35 ? 1.0 : 0.90;
+                            barRatioVal = Math.min(1, Math.max(0, rawNum / (130 * af * (ht2 / 170) * (wt2 / 70))));
+                          } else {
+                            barRatioVal = meta.barRatio(rawNum);
+                          }
+                          const bLabel = meta.barLabel((meta as any).isPower ? barRatioVal : rawNum);
+                          const bColor = meta.barColor((meta as any).isPower ? barRatioVal : rawNum);
+
                           return (
-                            <div key={i} style={{ background: isDark ? "#141A17" : "white", border: `1px solid ${border}`, borderRadius: 16, padding: "20px 18px", position: "relative", overflow: "hidden" }}>
-                              {/* glow behind */}
+                            <div
+                              key={i}
+                              onClick={() => setTopMomentExpanded(isOpen ? null : i)}
+                              style={{ background: isDark ? "#141A17" : "white", border: `1px solid ${isOpen ? meta.color + "55" : border}`, borderRadius: 16, padding: "20px 18px", position: "relative", overflow: "hidden", cursor: "pointer", transition: "all 0.2s", boxShadow: isOpen ? `0 0 0 2px ${meta.color}22` : "none" }}
+                            >
                               <div style={{ position: "absolute", top: -28, right: -28, width: 100, height: 100, borderRadius: "50%", background: `radial-gradient(circle, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
-                              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: `${meta.color}18`, border: `1px solid ${meta.color}28`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                  {meta.icon === "bolt" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>}
-                                  {meta.icon === "sprint" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M13 4a1 1 0 1 0 2 0 1 1 0 0 0-2 0"/><path d="m7.5 14 2.5-6 3 3 2-3.5"/><path d="M5 20h14"/></svg>}
-                                  {meta.icon === "agility" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>}
-                                </div>
-                                <p style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h.label}</p>
-                              </div>
-                              {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 32, color: text1, lineHeight: 1, marginBottom: 6 }}>{h.value}</p>}
-                              {h.label === "Peak Stride Power" && (() => {
-                                const nm = parseFloat(h.value) || 0;
-                                const age = parseInt(profile.age || "20");
-                                const ht  = parseFloat((profile as any).heightCm || "170");
-                                const wt  = parseFloat((profile as any).weightKg || "70");
-                                const ageFactor = age < 10 ? 0.50 : age < 14 ? 0.65 : age < 18 ? 0.80 : age < 35 ? 1.0 : 0.90;
-                                const refMax = 130 * ageFactor * (ht / 170) * (wt / 70);
-                                const ratio  = Math.min(1, Math.max(0, nm / refMax));
-                                const bandLabel = ratio < 0.3 ? "Light" : ratio < 0.55 ? "Moderate" : ratio < 0.8 ? "Strong" : "Max Power";
-                                const bandColor = ratio < 0.3 ? "#10B981" : ratio < 0.55 ? "#F59E0B" : ratio < 0.8 ? "#F97316" : "#EF4444";
-                                return (
-                                  <div style={{ marginBottom: 8 }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                                      <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Light</span>
-                                      <span style={{ fontSize: 9, fontWeight: 700, color: bandColor, textTransform: "uppercase", letterSpacing: "0.06em" }}>{bandLabel}</span>
-                                      <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Max</span>
-                                    </div>
-                                    <div style={{ height: 7, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)", overflow: "hidden", position: "relative" }}>
-                                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, #10B981 0%, #F59E0B 45%, #F97316 70%, #EF4444 100%)", opacity: 0.2, borderRadius: 4 }} />
-                                      <div style={{ height: "100%", width: `${ratio * 100}%`, borderRadius: 4, background: "linear-gradient(90deg, #10B981 0%, #F59E0B 45%, #F97316 70%, #EF4444 100%)", backgroundSize: `${(1 / Math.max(ratio, 0.01)) * 100}% 100%`, transition: "width 0.5s ease" }} />
-                                    </div>
-                                    <p style={{ fontSize: 9, color: text2, marginTop: 4 }}>vs. your age & size profile</p>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ width: 36, height: 36, borderRadius: 10, background: `${meta.color}18`, border: `1px solid ${meta.color}28`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    {meta.icon === "bolt"    && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>}
+                                    {meta.icon === "sprint"  && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M13 4a1 1 0 1 0 2 0 1 1 0 0 0-2 0"/><path d="m7.5 14 2.5-6 3 3 2-3.5"/><path d="M5 20h14"/></svg>}
+                                    {meta.icon === "agility" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>}
                                   </div>
-                                );
-                              })()}
-                              <p style={{ fontSize: 11, color: text2 }}>at {h.timestamp_s.toFixed(1)}s · {h.sessionName}</p>
+                                  <p style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h.label}</p>
+                                </div>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={text2} strokeWidth="2" strokeLinecap="round" style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }}><polyline points="6 9 12 15 18 9"/></svg>
+                              </div>
+
+                              {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 32, color: text1, lineHeight: 1, marginBottom: 10 }}>{h.value}</p>}
+
+                              {/* Strength bar — always visible */}
+                              <div style={{ marginBottom: 8 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.barMin}</span>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: bColor, textTransform: "uppercase", letterSpacing: "0.05em" }}>{bLabel}</span>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.barMax}</span>
+                                </div>
+                                <div style={{ height: 7, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)", overflow: "hidden", position: "relative" }}>
+                                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, #10B981 0%, #F59E0B 45%, #F97316 70%, #EF4444 100%)", opacity: 0.18, borderRadius: 4 }} />
+                                  <div style={{ height: "100%", width: `${barRatioVal * 100}%`, borderRadius: 4, background: `linear-gradient(90deg, #10B981 0%, ${bColor} 100%)`, transition: "width 0.6s ease" }} />
+                                </div>
+                              </div>
+
+                              <p style={{ fontSize: 10, color: text2 }}>at {h.timestamp_s.toFixed(1)}s · {h.sessionName}</p>
+
+                              {/* Flashcard expansion */}
+                              {isOpen && (
+                                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${border}` }}>
+                                  <p style={{ fontSize: 12, color: isDark ? "rgba(255,255,255,0.65)" : "#374151", lineHeight: 1.6 }}>{meta.explain}</p>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1292,15 +1685,18 @@ export default function ProfilePage() {
                         return (
                           <div key={s.id} style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${isSelected ? "rgba(5,150,105,0.5)" : border}`, background: isDark ? "#141A17" : "white", boxShadow: isSelected ? "0 0 0 2px rgba(5,150,105,0.25)" : "none", transition: "box-shadow 0.15s" }}>
                             {/* Thumbnail */}
-                            <div style={{ position: "relative", height: 148, cursor: "pointer" }} onClick={() => toggleCompare(s.id)}>
+                            <div style={{ position: "relative", height: 148, cursor: "pointer" }} onClick={() => setVideoModal(s)}>
                               <img src={thumb} alt="" crossOrigin={s.thumbnail ? undefined : "anonymous"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
                               <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.62) 100%)" }} />
-                              {/* Compare checkbox */}
-                              <div style={{ position: "absolute", top: 8, left: 8, width: 20, height: 20, borderRadius: 6, border: `2px solid ${isSelected ? "#059669" : "rgba(255,255,255,0.4)"}`, background: isSelected ? "#059669" : "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              {/* Compare checkbox — stop propagation so clicking it doesn't open modal */}
+                              <div
+                                style={{ position: "absolute", top: 8, left: 8, width: 20, height: 20, borderRadius: 6, border: `2px solid ${isSelected ? "#059669" : "rgba(255,255,255,0.4)"}`, background: isSelected ? "#059669" : "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}
+                                onClick={e => { e.stopPropagation(); toggleCompare(s.id); }}
+                              >
                                 {isSelected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                               </div>
                               {/* Play button */}
-                              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
                                 <div style={{ width: 42, height: 42, borderRadius: "50%", background: "rgba(0,0,0,0.48)", border: "2px solid rgba(255,255,255,0.38)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                 </div>
@@ -1348,7 +1744,7 @@ export default function ProfilePage() {
                   <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", display: "block" }}>
                     <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, overflow: "hidden", transition: "all 0.15s", cursor: "pointer" }}>
                       <div style={{ height: 160, overflow: "hidden" }}>
-                        <img src={item.img} alt={item.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        <img src={item.img} alt={item.title} crossOrigin="anonymous" style={{ width: "100%", height: "100%", objectFit: "cover", background: "#1a2e28" }} onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                       </div>
                       <div style={{ padding: "14px 16px" }}>
                         <span style={{ fontSize: 10, fontWeight: 800, color: "#10B981", textTransform: "uppercase", letterSpacing: "0.08em" }}>{item.cat}</span>

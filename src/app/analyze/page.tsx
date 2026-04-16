@@ -4,6 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useProfile, AnalysisSession } from "@/contexts/ProfileContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { saveVideo, savePoseFrames } from "@/lib/videoStorage";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Status = "idle" | "uploading" | "analyzing_ai" | "success" | "error";
@@ -108,24 +109,29 @@ export default function AnalyzePage() {
   /** Build a canvas-space joints map from raw backend landmarks for the current frame. */
   function getCanvasJoints(
     lms: any[], cW: number, cH: number, vW: number, vH: number,
-  ): Record<string, { x: number; y: number }> | null {
+  ): Record<string, { x: number; y: number; z?: number }> | null {
     if (!lms || lms.length < 29) return null;
-    const j: Record<string, { x: number; y: number }> = {};
+    const j: Record<string, { x: number; y: number; z?: number }> = {};
     for (const [name, idx] of Object.entries(LM_IDX)) {
       const lm = lms[idx];
       if (!lm || (lm.visibility ?? 1) < 0.12) continue;
-      j[name] = lmToCanvas(lm.x, lm.y, cW, cH, vW, vH);
+      const { x, y } = lmToCanvas(lm.x, lm.y, cW, cH, vW, vH);
+      j[name] = { x, y, z: lm.z ?? 0 };
     }
     // Require nose + at least one hip to consider the skeleton valid
     if (!j.nose || (!j.lHip && !j.rHip)) return null;
     // Synthetic neck = midpoint of shoulders (if both visible)
     if (j.lShoulder && j.rShoulder)
-      j.neck = { x: (j.lShoulder.x + j.rShoulder.x) / 2, y: (j.lShoulder.y + j.rShoulder.y) / 2 };
+      j.neck = { x: (j.lShoulder.x + j.rShoulder.x) / 2, y: (j.lShoulder.y + j.rShoulder.y) / 2, z: ((j.lShoulder.z ?? 0) + (j.rShoulder.z ?? 0)) / 2 };
     return j;
   }
 
-  // ── Real skeleton: draws using actual per-frame landmark positions ───────────
-  function drawSkeletonReal(ctx: CanvasRenderingContext2D, j: Record<string, { x: number; y: number }>, color: string) {
+  // ── Real skeleton: draws using actual per-frame landmark positions + z-depth ─
+  function drawSkeletonReal(
+    ctx: CanvasRenderingContext2D,
+    j: Record<string, { x: number; y: number; z?: number }>,
+    color: string,
+  ) {
     const BONES: [string, string][] = [
       ["nose","neck"],
       ["neck","lShoulder"],["neck","rShoulder"],
@@ -136,18 +142,37 @@ export default function AnalyzePage() {
       ["lHip","lKnee"],["lKnee","lAnkle"],
       ["rHip","rKnee"],["rKnee","rAnkle"],
     ];
-    ctx.shadowColor = color; ctx.shadowBlur = 8;
-    ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.92;
+    // z-depth: MediaPipe z is negative = closer to camera.
+    // We map z ∈ [-0.3, 0.3] → alpha/thickness multiplier.
+    const zAlpha = (name: string) => {
+      const z = j[name]?.z ?? 0;
+      return Math.max(0.45, Math.min(1, 0.75 + (-z) * 1.2));
+    };
+    // Draw bones
     BONES.forEach(([a, b]) => {
       if (!j[a] || !j[b]) return;
+      const alpha = (zAlpha(a) + zAlpha(b)) / 2;
+      const depth = ((j[a].z ?? 0) + (j[b].z ?? 0)) / 2;
+      const lw    = Math.max(1.5, 3.5 + (-depth) * 4);   // thicker when closer
+      ctx.globalAlpha  = alpha;
+      ctx.shadowColor  = color;
+      ctx.shadowBlur   = 8 * alpha;
+      ctx.strokeStyle  = color;
+      ctx.lineWidth    = lw;
       ctx.beginPath(); ctx.moveTo(j[a].x, j[a].y); ctx.lineTo(j[b].x, j[b].y); ctx.stroke();
     });
     ctx.shadowBlur = 0;
-    Object.entries(j).forEach(([name, pos]) => {
-      if (name === "neck") return; // synthetic — don't draw a dot
-      const r = name === "nose" ? 7 : 4;
+    // Draw joints (back-to-front by z so closer joints render on top)
+    const entries = Object.entries(j).filter(([n]) => n !== "neck").sort(([, a], [, b]) => (b.z ?? 0) - (a.z ?? 0));
+    entries.forEach(([name, pos]) => {
+      const alpha = zAlpha(name);
+      const depth = pos.z ?? 0;
+      const r = (name === "nose" ? 7 : 4.5) + (-depth) * 3;
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = color; ctx.shadowBlur = 6 * alpha;
       ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = name === "nose" ? "rgba(255,255,255,0.95)" : color; ctx.fill();
+      ctx.fillStyle = name === "nose" ? "rgba(255,255,255,0.95)" : color;
+      ctx.fill();
     });
     ctx.globalAlpha = 1; ctx.shadowBlur = 0;
   }
@@ -287,13 +312,11 @@ export default function AnalyzePage() {
       ctx.globalAlpha = 1;
     }
 
-    // ── Draw skeleton ──────────────────────────────────────────────────────────
+    // ── Draw skeleton (only when real pose data is available) ─────────────────
     if (joints) {
       drawSkeletonReal(ctx, joints, color);
-    } else {
-      const scale = cH * 0.18;
-      drawSkeletonSynthetic(ctx, cx, cy - scale * 0.1, scale, color, now);
     }
+    // No synthetic fallback — never show a fake T-pose skeleton
 
     // ── Pulsing ellipse at feet ────────────────────────────────────────────────
     const feetY = joints
@@ -476,6 +499,23 @@ export default function AnalyzePage() {
 
       const thumbnail = captureThumbnail();
 
+      // Build per-frame bounding box track from pose landmarks
+      const vW = data.pose?.metadata?.width  ?? 1;
+      const vH = data.pose?.metadata?.height ?? 1;
+      const bboxTrack = (data.pose?.frames ?? []).map((frame: any) => {
+        const lms = frame.landmarks ?? [];
+        const vis = lms.filter((lm: any) => (lm.visibility ?? 0) > 0.1);
+        if (vis.length < 3) return null;
+        const xs = vis.map((lm: any) => lm.x as number);
+        const ys = vis.map((lm: any) => lm.y as number);
+        return {
+          x0: Math.min(...xs) * vW,
+          y0: Math.min(...ys) * vH,
+          x1: Math.max(...xs) * vW,
+          y1: Math.max(...ys) * vH,
+        };
+      });
+
       const session: AnalysisSession = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
@@ -497,9 +537,19 @@ export default function AnalyzePage() {
         highlights,
         kinematics: data.cleaned_kinematics,
         injuryRisk: data.injury_risk,
+        bboxTrack: bboxTrack.length > 0 ? bboxTrack : undefined,
+        bboxMeta:  bboxTrack.length > 0 ? { width: vW, height: vH } : undefined,
       };
 
       addSession(session);
+      // Persist video + pose frames to IndexedDB for later playback with skeleton overlay
+      saveVideo(session.id, fileToUpload).catch(() => {});
+      if (data.pose?.frames?.length) {
+        savePoseFrames(session.id, {
+          frames:   data.pose.frames,
+          metadata: { width: vW, height: vH },
+        }).catch(() => {});
+      }
       setResult(session);
       setStatus("success");
     } catch (err) {
