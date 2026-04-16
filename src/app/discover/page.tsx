@@ -4,87 +4,84 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useProfile } from "@/contexts/ProfileContext";
 
-// ── Demo athletes (seeded) ─────────────────────────────────────────────────────
+// ── Jalisqueñas FC athletes ────────────────────────────────────────────────────
 const DEMO_ATHLETES = [
   {
-    id: "demo1", name: "Sofia Martinez", age: 19, position: "Winger", secondaryPosition: "Attacking Mid",
-    location: "Barcelona, Spain", nationality: "Spain", club: "FC Femení B", academicYear: "Sophomore",
-    targetLeague: "Liga F", openToRecruitment: true, heightCm: 163, weightKg: 58,
-    dominantFoot: "Left", yearsPlaying: 11, bio: "Electric pace on the flank with exceptional dribbling. Top scorer in my division last season.",
-    peakSpeedMs: 8.6, symmetryScore: 92, sessions: 14, risk: "low",
-    moves: ["Cruyff Turn","Stepover","Overlap Run","Diagonal Cut"],
-    photo: "https://images.unsplash.com/photo-1594736797933-d0401ba2fe65?auto=format&fit=crop&w=200&q=80",
-    goals: "18", assists: "11", appearances: "22",
-  },
-  {
-    id: "demo2", name: "Amara Diallo", age: 21, position: "Midfielder", secondaryPosition: "Defensive Mid",
-    location: "Paris, France", nationality: "France", club: "Paris FC Academy", academicYear: "Junior",
-    targetLeague: "D1 Arkema", openToRecruitment: true, heightCm: 170, weightKg: 63,
-    dominantFoot: "Right", yearsPlaying: 13, bio: "Deep-lying playmaker with exceptional vision and press resistance. Leadership on and off the pitch.",
-    peakSpeedMs: 7.9, symmetryScore: 87, sessions: 9, risk: "low",
-    moves: ["Wall Pass","Through Ball","Press Trigger","Box-to-Box Run"],
-    photo: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=200&q=80",
-    goals: "5", assists: "19", appearances: "24",
-  },
-  {
-    id: "demo3", name: "Chloe Nguyen", age: 17, position: "Striker", secondaryPosition: "Forward",
-    location: "Los Angeles, CA", nationality: "USA", club: "LA Galaxy Academy", academicYear: "Freshman",
-    targetLeague: "NWSL", openToRecruitment: true, heightCm: 168, weightKg: 62,
-    dominantFoot: "Right", yearsPlaying: 9, bio: "Clinical finisher with explosive first touch. Strong aerial presence for my height.",
-    peakSpeedMs: 8.1, symmetryScore: 84, sessions: 6, risk: "moderate",
-    moves: ["First Touch Finish","Header","Spinning Turn","Late Run"],
-    photo: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&q=80",
-    goals: "24", assists: "6", appearances: "18",
-  },
-  {
-    id: "demo4", name: "Lena Braun", age: 20, position: "Center Back", secondaryPosition: "Full Back",
-    location: "Munich, Germany", nationality: "Germany", club: "FC Bayern München II", academicYear: "Sophomore",
-    targetLeague: "Frauen-Bundesliga", openToRecruitment: true, heightCm: 174, weightKg: 67,
-    dominantFoot: "Right", yearsPlaying: 10, bio: "Dominant in the air and composed with the ball at my feet. Modern CB who can play out from the back.",
-    peakSpeedMs: 7.4, symmetryScore: 89, sessions: 11, risk: "low",
-    moves: ["Long Ball Switch","Stepping Out","Aerial Duel","Recovery Run"],
-    photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80",
-    goals: "3", assists: "5", appearances: "20",
-  },
-  {
-    id: "demo5", name: "Yuki Tanaka", age: 18, position: "Goalkeeper", secondaryPosition: "",
-    location: "Tokyo, Japan", nationality: "Japan", club: "INAC Kobe Academy", academicYear: "Freshman",
-    targetLeague: "WE League", openToRecruitment: true, heightCm: 172, weightKg: 66,
-    dominantFoot: "Right", yearsPlaying: 8, bio: "Shot-stopper with elite reflexes. Comfortable sweeping outside the box and distributing with my feet.",
-    peakSpeedMs: 6.8, symmetryScore: 91, sessions: 5, risk: "low",
-    moves: ["Sweeper Keeper","Distribution","Command of Area","Penalty Stop"],
+    id: "demo1", name: "Edith Hernández", age: 16, position: "Striker", secondaryPosition: "Forward",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Sophomore",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 165, weightKg: 58,
+    dominantFoot: "Right", yearsPlaying: 8,
+    bio: "Clinical finisher with explosive acceleration. Dangerous on and off the ball — reads the defense before the pass arrives.",
+    peakSpeedMs: 8.4, symmetryScore: 88, sessions: 6, risk: "low",
+    moves: ["One-Touch Finish","Run in Behind","Hold-Up Play","Late Run"],
     photo: "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=200&q=80",
-    goals: "0", assists: "1", appearances: "19",
+    goals: "16", assists: "5", appearances: "13",
   },
   {
-    id: "demo6", name: "Priya Kapoor", age: 22, position: "Full Back", secondaryPosition: "Winger",
-    location: "Mumbai, India", nationality: "India", club: "Kickstart FC", academicYear: "Senior",
-    targetLeague: "Indian Women's League", openToRecruitment: true, heightCm: 161, weightKg: 56,
-    dominantFoot: "Both", yearsPlaying: 12, bio: "Attack-minded fullback known for overlapping runs and dangerous crosses. Strong defensive positioning.",
-    peakSpeedMs: 8.3, symmetryScore: 88, sessions: 8, risk: "low",
-    moves: ["Overlap Run","Cross","Tuck Inside","Recovery Sprint"],
-    photo: "https://images.unsplash.com/photo-1614027164847-1b28cfe1df60?auto=format&fit=crop&w=200&q=80",
-    goals: "7", assists: "14", appearances: "21",
-  },
-  {
-    id: "demo7", name: "Isabela Costa", age: 23, position: "Attacking Mid", secondaryPosition: "Winger",
-    location: "São Paulo, Brazil", nationality: "Brazil", club: "Corinthians Feminino", academicYear: "Graduate",
-    targetLeague: "Liga Profissional", openToRecruitment: false, heightCm: 165, weightKg: 60,
-    dominantFoot: "Left", yearsPlaying: 15, bio: "Creative playmaker who dictates tempo. Known for key passes and set piece delivery.",
-    peakSpeedMs: 7.7, symmetryScore: 85, sessions: 17, risk: "moderate",
-    moves: ["No-Look Pass","Nutmeg","Free Kick","Dribble into Box"],
-    photo: "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=200&q=80",
-    goals: "12", assists: "22", appearances: "27",
-  },
-  {
-    id: "demo8", name: "Maya Thompson", age: 16, position: "Winger", secondaryPosition: "Forward",
-    location: "London, UK", nationality: "England", club: "Arsenal Academy", academicYear: "Freshman",
-    targetLeague: "WSL", openToRecruitment: true, heightCm: 160, weightKg: 55,
-    dominantFoot: "Right", yearsPlaying: 7, bio: "Exciting young talent with incredible acceleration and direct style of play. England U17 national team squad.",
-    peakSpeedMs: 8.9, symmetryScore: 82, sessions: 4, risk: "moderate",
-    moves: ["Sprint in Behind","Cutback","1v1 Dribble","Acceleration"],
+    id: "demo2", name: "Fernanda Sánchez", age: 15, position: "Attacking Mid", secondaryPosition: "Midfielder",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Freshman",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 161, weightKg: 55,
+    dominantFoot: "Left", yearsPlaying: 7,
+    bio: "Creative playmaker with natural vision and technique beyond her age. Links play effortlessly and delivers in tight spaces.",
+    peakSpeedMs: 7.6, symmetryScore: 91, sessions: 5, risk: "low",
+    moves: ["Through Ball","Dribble into Box","Free Kick","Press Trigger"],
     photo: "https://images.unsplash.com/photo-1502823403499-6ccfcf4fb453?auto=format&fit=crop&w=200&q=80",
-    goals: "15", assists: "8", appearances: "14",
+    goals: "7", assists: "14", appearances: "12",
+  },
+  {
+    id: "demo3", name: "Ines Romano", age: 16, position: "Winger", secondaryPosition: "Forward",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Sophomore",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 163, weightKg: 57,
+    dominantFoot: "Right", yearsPlaying: 6,
+    bio: "Rapid wide forward who lives off 1v1 duels. Cuts inside onto her stronger foot and has an eye for goal from range.",
+    peakSpeedMs: 8.8, symmetryScore: 85, sessions: 4, risk: "moderate",
+    moves: ["Sprint in Behind","Cutback","1v1 Dribble","Inverted Cut"],
+    photo: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=200&q=80",
+    goals: "11", assists: "9", appearances: "14",
+  },
+  {
+    id: "demo4", name: "Joca Cervantes", age: 15, position: "Center Back", secondaryPosition: "Defensive Mid",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Freshman",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 169, weightKg: 63,
+    dominantFoot: "Right", yearsPlaying: 7,
+    bio: "Composed, dominant defender who reads the game two steps ahead. Comfortable bringing the ball out from the back under pressure.",
+    peakSpeedMs: 7.2, symmetryScore: 90, sessions: 7, risk: "low",
+    moves: ["Aerial Duel","Recovery Run","Long Ball Switch","Stepping Out"],
+    photo: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=200&q=80",
+    goals: "2", assists: "3", appearances: "15",
+  },
+  {
+    id: "demo5", name: "Lumi Keppo", age: 16, position: "Goalkeeper", secondaryPosition: "",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Sophomore",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 172, weightKg: 65,
+    dominantFoot: "Right", yearsPlaying: 5,
+    bio: "Elite shot-stopper with fast reflexes and calm distribution. Commands her box confidently and sweeps behind the line when needed.",
+    peakSpeedMs: 6.5, symmetryScore: 93, sessions: 8, risk: "low",
+    moves: ["Shot Stop","Sweeper Keeper","Distribution","Command of Area"],
+    photo: "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=200&q=80",
+    goals: "0", assists: "2", appearances: "16",
+  },
+  {
+    id: "demo6", name: "Melina González", age: 15, position: "Midfielder", secondaryPosition: "Defensive Mid",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Freshman",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 162, weightKg: 57,
+    dominantFoot: "Both", yearsPlaying: 6,
+    bio: "Box-to-box engine with tireless work rate and a sharp football brain. Wins the ball back quickly and distributes without fuss.",
+    peakSpeedMs: 7.9, symmetryScore: 87, sessions: 5, risk: "low",
+    moves: ["Box-to-Box Run","Interception","Through Ball","Press Trigger"],
+    photo: "https://images.unsplash.com/photo-1594736797933-d0401ba2fe65?auto=format&fit=crop&w=200&q=80",
+    goals: "4", assists: "11", appearances: "13",
+  },
+  {
+    id: "demo7", name: "Niza Verona", age: 16, position: "Full Back", secondaryPosition: "Winger",
+    location: "Mexico City, Mexico", nationality: "Mexico", club: "Jalisqueñas FC", academicYear: "Sophomore",
+    targetLeague: "Liga MX Femenil", openToRecruitment: true, heightCm: 160, weightKg: 56,
+    dominantFoot: "Left", yearsPlaying: 7,
+    bio: "Attack-minded left back with an electric engine and dangerous delivery. Tracks back diligently but is at her best bombing forward.",
+    peakSpeedMs: 8.1, symmetryScore: 89, sessions: 6, risk: "low",
+    moves: ["Overlap Run","Cross","Recovery Sprint","Tuck Inside"],
+    photo: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=200&q=80",
+    goals: "5", assists: "13", appearances: "14",
   },
 ];
 
@@ -109,8 +106,11 @@ function AthleteCard({ athlete, onShortlist, shortlisted }: { athlete: DemoAthle
 
       {/* Top section */}
       <div style={{ padding: "20px 20px 16px", display: "flex", gap: 14, alignItems: "flex-start" }}>
-        <div style={{ width: 56, height: 56, borderRadius: 14, overflow: "hidden", flexShrink: 0, border: "2px solid rgba(255,255,255,0.08)" }}>
-          <img src={athlete.photo} alt={athlete.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <div style={{ width: 56, height: 56, borderRadius: 14, overflow: "hidden", flexShrink: 0, border: "2px solid rgba(255,255,255,0.08)", background: "linear-gradient(135deg,#059669,#0D9488)", position: "relative" }}>
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "absolute", inset: 0 }}>
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 22, color: "white" }}>{athlete.name.charAt(0)}</span>
+          </div>
+          <img src={athlete.photo} alt={athlete.name} style={{ width: "100%", height: "100%", objectFit: "cover", position: "absolute", inset: 0 }} onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: "white", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{athlete.name}</p>
@@ -158,7 +158,7 @@ function AthleteCard({ athlete, onShortlist, shortlisted }: { athlete: DemoAthle
           style={{ flex: 1, padding: "10px", borderRadius: 10, background: shortlisted ? "rgba(5,150,105,0.15)" : "transparent", border: `1px solid ${shortlisted ? "rgba(5,150,105,0.4)" : "rgba(255,255,255,0.1)"}`, color: shortlisted ? "#10B981" : "rgba(255,255,255,0.4)", fontWeight: 700, fontSize: 12, cursor: "pointer", transition: "all 0.15s" }}>
           {shortlisted ? "★ Shortlisted" : "☆ Shortlist"}
         </button>
-        <Link href="/athlete" style={{ flex: 1, padding: "10px", borderRadius: 10, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(5,150,105,0.25)" }}>
+        <Link href={athlete.id === "current_user" ? "/athlete" : `/athlete?id=${athlete.id}`} style={{ flex: 1, padding: "10px", borderRadius: 10, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(5,150,105,0.25)" }}>
           View Profile →
         </Link>
       </div>

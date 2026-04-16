@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useProfile, AnalysisSession } from "@/contexts/ProfileContext";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { saveVideo, savePoseFrames } from "@/lib/videoStorage";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Status = "idle" | "uploading" | "analyzing_ai" | "success" | "error";
@@ -62,8 +63,20 @@ export default function AnalyzePage() {
   const [trimStart,     setTrimStart]     = useState(0);
   const [trimEnd,       setTrimEnd]       = useState(0);
   const [targetX,       setTargetX]       = useState<number | null>(null);
+  const [targetY,       setTargetY]       = useState<number | null>(null);
   const [markerPct,     setMarkerPct]     = useState<number | null>(null);
   const [pickMode,      setPickMode]      = useState(false);
+  const [overlayEnabled, setOverlayEnabled] = useState(true);
+  const [customThumb,   setCustomThumb]   = useState<string | undefined>(undefined);
+  const [settingThumb,  setSettingThumb]  = useState(false);
+  // Smoothed athlete position (fallback when no pose data)
+  const smoothX = useRef<number | null>(null);
+  const smoothY = useRef<number | null>(null);
+  // Raw per-frame pose data from backend (NOT persisted to localStorage)
+  const poseFramesRef = useRef<any[]>([]);
+  const poseMetaRef   = useRef<{ width: number; height: number }>({ width: 1, height: 1 });
+  // Motion trail: last N hip-midpoint positions in canvas coords
+  const trailRef = useRef<Array<{ x: number; y: number }>>([]);
   const [result,        setResult]        = useState<AnalysisSession | null>(null);
   const [summaryOpen,   setSummaryOpen]   = useState(false);
   const [movesOpen,     setMovesOpen]     = useState(false);
@@ -72,7 +85,303 @@ export default function AnalyzePage() {
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const videoRef   = useRef<HTMLVideoElement>(null);
+  const canvasRef  = useRef<HTMLCanvasElement>(null);
+  const animRef    = useRef<number>(0);
   const videoUrl   = useMemo(() => file ? URL.createObjectURL(file) : null, [file]);
+
+  // ── MediaPipe landmark indices we use for drawing ───────────────────────────
+  const LM_IDX: Record<string, number> = {
+    nose: 0, lShoulder: 11, rShoulder: 12,
+    lElbow: 13, rElbow: 14, lWrist: 15, rWrist: 16,
+    lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28,
+  };
+
+  /** Map a backend landmark (in original video pixel space) to canvas display coords.
+   *  Accounts for letterboxing when the video aspect ratio differs from the canvas. */
+  function lmToCanvas(lx: number, ly: number, cW: number, cH: number, vW: number, vH: number) {
+    const va = vW / vH, ca = cW / cH;
+    let rW: number, rH: number, ox: number, oy: number;
+    if (va > ca) { rW = cW; rH = cW / va; ox = 0;         oy = (cH - rH) / 2; }
+    else         { rH = cH; rW = cH * va; oy = 0;         ox = (cW - rW) / 2; }
+    return { x: ox + (lx / vW) * rW, y: oy + (ly / vH) * rH };
+  }
+
+  /** Build a canvas-space joints map from raw backend landmarks for the current frame. */
+  function getCanvasJoints(
+    lms: any[], cW: number, cH: number, vW: number, vH: number,
+  ): Record<string, { x: number; y: number; z?: number }> | null {
+    if (!lms || lms.length < 29) return null;
+    const j: Record<string, { x: number; y: number; z?: number }> = {};
+    for (const [name, idx] of Object.entries(LM_IDX)) {
+      const lm = lms[idx];
+      if (!lm || (lm.visibility ?? 1) < 0.12) continue;
+      const { x, y } = lmToCanvas(lm.x, lm.y, cW, cH, vW, vH);
+      j[name] = { x, y, z: lm.z ?? 0 };
+    }
+    // Require nose + at least one hip to consider the skeleton valid
+    if (!j.nose || (!j.lHip && !j.rHip)) return null;
+    // Synthetic neck = midpoint of shoulders (if both visible)
+    if (j.lShoulder && j.rShoulder)
+      j.neck = { x: (j.lShoulder.x + j.rShoulder.x) / 2, y: (j.lShoulder.y + j.rShoulder.y) / 2, z: ((j.lShoulder.z ?? 0) + (j.rShoulder.z ?? 0)) / 2 };
+    return j;
+  }
+
+  // ── Real skeleton: draws using actual per-frame landmark positions + z-depth ─
+  function drawSkeletonReal(
+    ctx: CanvasRenderingContext2D,
+    j: Record<string, { x: number; y: number; z?: number }>,
+    color: string,
+  ) {
+    const BONES: [string, string][] = [
+      ["nose","neck"],
+      ["neck","lShoulder"],["neck","rShoulder"],
+      ["lShoulder","lElbow"],["lElbow","lWrist"],
+      ["rShoulder","rElbow"],["rElbow","rWrist"],
+      ["neck","lHip"],["neck","rHip"],
+      ["lHip","rHip"],
+      ["lHip","lKnee"],["lKnee","lAnkle"],
+      ["rHip","rKnee"],["rKnee","rAnkle"],
+    ];
+    // z-depth: MediaPipe z is negative = closer to camera.
+    // We map z ∈ [-0.3, 0.3] → alpha/thickness multiplier.
+    const zAlpha = (name: string) => {
+      const z = j[name]?.z ?? 0;
+      return Math.max(0.45, Math.min(1, 0.75 + (-z) * 1.2));
+    };
+    // Draw bones
+    BONES.forEach(([a, b]) => {
+      if (!j[a] || !j[b]) return;
+      const alpha = (zAlpha(a) + zAlpha(b)) / 2;
+      const depth = ((j[a].z ?? 0) + (j[b].z ?? 0)) / 2;
+      const lw    = Math.max(1.5, 3.5 + (-depth) * 4);   // thicker when closer
+      ctx.globalAlpha  = alpha;
+      ctx.shadowColor  = color;
+      ctx.shadowBlur   = 8 * alpha;
+      ctx.strokeStyle  = color;
+      ctx.lineWidth    = lw;
+      ctx.beginPath(); ctx.moveTo(j[a].x, j[a].y); ctx.lineTo(j[b].x, j[b].y); ctx.stroke();
+    });
+    ctx.shadowBlur = 0;
+    // Draw joints (back-to-front by z so closer joints render on top)
+    const entries = Object.entries(j).filter(([n]) => n !== "neck").sort(([, a], [, b]) => (b.z ?? 0) - (a.z ?? 0));
+    entries.forEach(([name, pos]) => {
+      const alpha = zAlpha(name);
+      const depth = pos.z ?? 0;
+      const r = (name === "nose" ? 7 : 4.5) + (-depth) * 3;
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = color; ctx.shadowBlur = 6 * alpha;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = name === "nose" ? "rgba(255,255,255,0.95)" : color;
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  }
+
+  // ── Synthetic skeleton fallback (used when no pose data is available) ────────
+  function drawSkeletonSynthetic(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, color: string, now: number) {
+    const sway = Math.sin(now * 0.0015) * scale * 0.04;
+    const joints: Record<string, [number, number]> = {
+      head:      [sway * 0.3,            -scale * 1.12],
+      neck:      [sway * 0.2,            -scale * 0.88],
+      lShoulder: [-scale * 0.28 + sway,  -scale * 0.72],
+      rShoulder: [ scale * 0.28 + sway,  -scale * 0.72],
+      lElbow:    [-scale * 0.40,         -scale * 0.40],
+      rElbow:    [ scale * 0.40,         -scale * 0.40],
+      lWrist:    [-scale * 0.34,         -scale * 0.10],
+      rWrist:    [ scale * 0.34,         -scale * 0.10],
+      lHip:      [-scale * 0.15,          0],
+      rHip:      [ scale * 0.15,          0],
+      lKnee:     [-scale * 0.18,          scale * 0.46],
+      rKnee:     [ scale * 0.18,          scale * 0.46],
+      lAnkle:    [-scale * 0.16,          scale * 0.88],
+      rAnkle:    [ scale * 0.16,          scale * 0.88],
+    };
+    const bones: [string, string][] = [
+      ["head","neck"],["neck","lShoulder"],["neck","rShoulder"],
+      ["neck","lHip"],["neck","rHip"],
+      ["lShoulder","lElbow"],["lElbow","lWrist"],
+      ["rShoulder","rElbow"],["rElbow","rWrist"],
+      ["lHip","rHip"],["lHip","lKnee"],["lKnee","lAnkle"],
+      ["rHip","rKnee"],["rKnee","rAnkle"],
+    ];
+    ctx.shadowColor = color; ctx.shadowBlur = 6;
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.85;
+    bones.forEach(([a, b]) => {
+      const [ax, ay] = joints[a]; const [bx, by] = joints[b];
+      ctx.beginPath(); ctx.moveTo(cx + ax, cy + ay); ctx.lineTo(cx + bx, cy + by); ctx.stroke();
+    });
+    ctx.shadowBlur = 0;
+    Object.entries(joints).forEach(([name, [jx, jy]]) => {
+      const r = name === "head" ? 7 : 3.5;
+      ctx.beginPath(); ctx.arc(cx + jx, cy + jy, r, 0, Math.PI * 2);
+      ctx.fillStyle = name === "head" ? "rgba(255,255,255,0.95)" : color; ctx.fill();
+    });
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  }
+
+  function drawOverlay() {
+    const canvas = canvasRef.current;
+    const video  = videoRef.current;
+    if (!canvas || !video) { animRef.current = requestAnimationFrame(drawOverlay); return; }
+
+    // Size canvas to rendered video element (letterboxing aware)
+    const vw = video.offsetWidth, vh = video.offsetHeight;
+    if (canvas.width !== vw)  canvas.width  = vw;
+    if (canvas.height !== vh) canvas.height = vh;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { animRef.current = requestAnimationFrame(drawOverlay); return; }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (markerPct === null) { animRef.current = requestAnimationFrame(drawOverlay); return; }
+
+    const sess   = result;
+    const tMs    = video.currentTime * 1000;
+    const cW     = canvas.width, cH = canvas.height;
+    const { width: vidW, height: vidH } = poseMetaRef.current;
+
+    // ── Find closest pose frame ────────────────────────────────────────────────
+    const frames = poseFramesRef.current;
+    let closestLandmarks: any[] | null = null;
+    if (frames.length > 0) {
+      let best = 0, bestDiff = Infinity;
+      for (let i = 0; i < frames.length; i++) {
+        const d = Math.abs(frames[i].timestamp_ms - tMs);
+        if (d < bestDiff) { bestDiff = d; best = i; }
+      }
+      closestLandmarks = frames[best]?.landmarks ?? null;
+    }
+
+    // ── Build canvas-space joint positions ────────────────────────────────────
+    const joints = closestLandmarks ? getCanvasJoints(closestLandmarks, cW, cH, vidW, vidH) : null;
+
+    // Determine center-of-mass (hips midpoint) and head position
+    let cx: number, cy: number, headX: number, headY: number;
+    if (joints) {
+      const lh = joints.lHip, rh = joints.rHip;
+      cx = lh && rh ? (lh.x + rh.x) / 2 : (lh ?? rh!).x;
+      cy = lh && rh ? (lh.y + rh.y) / 2 : (lh ?? rh!).y;
+      headX = joints.nose?.x ?? cx;
+      headY = joints.nose?.y ?? cy - cH * 0.20;
+    } else {
+      // Fallback: use click point with EMA smoothing
+      const rawX = (markerPct / 100) * cW;
+      const rawY = targetY !== null ? targetY * cH : cH * 0.55;
+      const alpha = 0.12;
+      smoothX.current = smoothX.current === null ? rawX : smoothX.current + alpha * (rawX - smoothX.current);
+      smoothY.current = smoothY.current === null ? rawY : smoothY.current + alpha * (rawY - smoothY.current);
+      cx = smoothX.current; cy = smoothY.current;
+      headX = cx; headY = cy - cH * 0.18 * 1.12;
+    }
+
+    // ── Look up current speed ──────────────────────────────────────────────────
+    let currentSpeed = 0;
+    if (sess?.kinematics?.timestamp_ms && sess.kinematics.ankle_speed_ms) {
+      let minDiff = Infinity, frameIdx = 0;
+      (sess.kinematics.timestamp_ms as number[]).forEach((t: number, i: number) => {
+        const d = Math.abs(t - tMs); if (d < minDiff) { minDiff = d; frameIdx = i; }
+      });
+      currentSpeed = (sess.kinematics.ankle_speed_ms as number[])[frameIdx] ?? 0;
+    } else if (sess?.peakSpeedMs) {
+      currentSpeed = sess.peakSpeedMs * 0.85;
+    }
+
+    const color = currentSpeed >= 7.5 ? "#F97316" : currentSpeed >= 6 ? "#FBBF24" : "#10B981";
+    const now   = Date.now();
+    const pulse = (Math.sin(now * 0.004) + 1) / 2;
+
+    // ── Motion trail: only accumulate when video is playing ───────────────────
+    if (!video.paused && !video.ended) {
+      const trail = trailRef.current;
+      trail.push({ x: cx, y: cy });
+      if (trail.length > 50) trail.shift();
+    }
+    // Draw trail (fading, thickening toward current position)
+    const trail = trailRef.current;
+    if (trail.length > 1) {
+      ctx.lineCap = "round";
+      for (let i = 1; i < trail.length; i++) {
+        const t = i / trail.length;           // 0=oldest → 1=newest
+        ctx.beginPath();
+        ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+        ctx.lineTo(trail[i].x,     trail[i].y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth   = 2 + t * 3;          // 2px → 5px
+        ctx.globalAlpha = t * 0.5;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Draw skeleton (only when real pose data is available) ─────────────────
+    if (joints) {
+      drawSkeletonReal(ctx, joints, color);
+    }
+    // No synthetic fallback — never show a fake T-pose skeleton
+
+    // ── Pulsing ellipse at feet ────────────────────────────────────────────────
+    const feetY = joints
+      ? ((joints.lAnkle?.y ?? 0) + (joints.rAnkle?.y ?? 0)) / (joints.lAnkle && joints.rAnkle ? 2 : 1)
+      : cy + cH * 0.18 * 0.88;
+    const ringR = 18 + pulse * 6;
+    ctx.beginPath(); ctx.ellipse(cx, feetY, ringR, ringR * 0.32, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.globalAlpha = 0.25 + pulse * 0.45; ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // ── Speed HUD — anchored above actual head landmark ───────────────────────
+    const hudY = headY - 28;
+    const speedTxt = currentSpeed > 0 ? `${currentSpeed.toFixed(2)} m/s`
+      : sess?.peakSpeedMs ? `${sess.peakSpeedMs.toFixed(2)} m/s` : "— m/s";
+    const badgeW = 84, badgeH = 26;
+    ctx.fillStyle = "rgba(0,0,0,0.72)";
+    ctx.beginPath(); (ctx as any).roundRect(headX - badgeW / 2, hudY - badgeH / 2, badgeW, badgeH, 7); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = color; ctx.font = "bold 12px monospace";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(speedTxt, headX, hudY);
+    // Thin connector line: badge → top of head
+    ctx.beginPath(); ctx.moveTo(headX, hudY + badgeH / 2); ctx.lineTo(headX, headY - 8);
+    ctx.strokeStyle = `${color}55`; ctx.lineWidth = 1; ctx.stroke();
+
+    animRef.current = requestAnimationFrame(drawOverlay);
+  }
+
+  useEffect(() => {
+    if (overlayEnabled && (markerPct !== null || result)) {
+      animRef.current = requestAnimationFrame(drawOverlay);
+    } else {
+      cancelAnimationFrame(animRef.current);
+      const canvas = canvasRef.current;
+      if (canvas) { const ctx = canvas.getContext("2d"); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
+    }
+    return () => cancelAnimationFrame(animRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayEnabled, markerPct, result]);
+
+  // ── Capture thumbnail from current video frame ─────────────────────────────
+  function captureFrame(): string | undefined {
+    const v = videoRef.current;
+    if (!v || v.readyState < 2) return undefined;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width  = 480;
+      canvas.height = Math.round(480 * (v.videoHeight / v.videoWidth)) || 270;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return undefined;
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.75);
+    } catch { return undefined; }
+  }
+
+  function handleSetThumbnail() {
+    videoRef.current?.pause();
+    const frame = captureFrame();
+    if (frame) setCustomThumb(frame);
+    setSettingThumb(false);
+  }
+
+  function captureThumbnail(): string | undefined {
+    return customThumb ?? captureFrame();
+  }
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
 
   // Force dark mode on this page
@@ -102,15 +411,20 @@ export default function AnalyzePage() {
     if (v.currentTime < trimStart) v.currentTime = trimStart;
   }
 
-  // Click on video to pick athlete
+  // Click on video to pick athlete — capture both X and Y
   function handleVideoClick(e: React.MouseEvent<HTMLDivElement>) {
     if (!pickMode) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const pct  = (e.clientX - rect.left) / rect.width;
-    setTargetX(pct);
-    setMarkerPct(pct * 100);
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top)  / rect.height;
+    setTargetX(x);
+    setTargetY(y);
+    setMarkerPct(x * 100);
+    // Reset smooth tracking and trail so they snap to the new pick point immediately
+    smoothX.current = null;
+    smoothY.current = null;
+    trailRef.current = [];
     setPickMode(false);
-    // Pause video when picking
     videoRef.current?.pause();
   }
 
@@ -163,6 +477,10 @@ export default function AnalyzePage() {
       const res  = await fetch(`${API_BASE}/upload-video`, { method: "POST", body: formData });
       const data = await res.json();
       if (!data.ok) { setStatus("error"); setStatusMsg(data.error ?? "Analysis failed."); return; }
+      // Store raw per-frame pose data for skeleton overlay (not persisted to localStorage)
+      poseFramesRef.current = data.pose?.frames ?? [];
+      poseMetaRef.current   = { width: data.pose?.metadata?.width ?? 1, height: data.pose?.metadata?.height ?? 1 };
+      trailRef.current      = [];
 
       setStatus("analyzing_ai"); setStatusMsg("Running AI analysis…");
 
@@ -179,9 +497,29 @@ export default function AnalyzePage() {
       const asymArr = data.cleaned_kinematics?.torque_asymmetry_pct?.filter((v: any) => v != null) ?? [];
       const meanAsym = asymArr.length ? asymArr.reduce((a: number, b: number) => a + b, 0) / asymArr.length : null;
 
+      const thumbnail = captureThumbnail();
+
+      // Build per-frame bounding box track from pose landmarks
+      const vW = data.pose?.metadata?.width  ?? 1;
+      const vH = data.pose?.metadata?.height ?? 1;
+      const bboxTrack = (data.pose?.frames ?? []).map((frame: any) => {
+        const lms = frame.landmarks ?? [];
+        const vis = lms.filter((lm: any) => (lm.visibility ?? 0) > 0.1);
+        if (vis.length < 3) return null;
+        const xs = vis.map((lm: any) => lm.x as number);
+        const ys = vis.map((lm: any) => lm.y as number);
+        return {
+          x0: Math.min(...xs) * vW,
+          y0: Math.min(...ys) * vH,
+          x1: Math.max(...xs) * vW,
+          y1: Math.max(...ys) * vH,
+        };
+      });
+
       const session: AnalysisSession = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
+        thumbnail,
         videoName: clipName || file.name.replace(/\.[^.]+$/, ""),
         videoDuration: data.cleaned_kinematics?.timestamp_ms?.slice(-1)[0] / 1000 ?? videoDuration,
         geminiSummary: gemini.summary,
@@ -199,9 +537,19 @@ export default function AnalyzePage() {
         highlights,
         kinematics: data.cleaned_kinematics,
         injuryRisk: data.injury_risk,
+        bboxTrack: bboxTrack.length > 0 ? bboxTrack : undefined,
+        bboxMeta:  bboxTrack.length > 0 ? { width: vW, height: vH } : undefined,
       };
 
       addSession(session);
+      // Persist video + pose frames to IndexedDB for later playback with skeleton overlay
+      saveVideo(session.id, fileToUpload).catch(() => {});
+      if (data.pose?.frames?.length) {
+        savePoseFrames(session.id, {
+          frames:   data.pose.frames,
+          metadata: { width: vW, height: vH },
+        }).catch(() => {});
+      }
       setResult(session);
       setStatus("success");
     } catch (err) {
@@ -335,7 +683,7 @@ export default function AnalyzePage() {
               <Link href="/profile" style={{ flex: 1, padding: "14px 0", borderRadius: 14, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 15, textAlign: "center", textDecoration: "none", boxShadow: "0 8px 24px rgba(5,150,105,0.35)" }}>
                 View Profile →
               </Link>
-              <button onClick={() => { setStatus("idle"); setFile(null); setResult(null); setProgress(0); setTargetX(null); setMarkerPct(null); setClipName(""); setSummaryOpen(false); setMovesOpen(false); setSuggestOpen(false); }}
+              <button onClick={() => { setStatus("idle"); setFile(null); setResult(null); setProgress(0); setTargetX(null); setTargetY(null); setMarkerPct(null); setClipName(""); setSummaryOpen(false); setMovesOpen(false); setSuggestOpen(false); }}
                 style={{ padding: "14px 20px", borderRadius: 14, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
                 New Analysis
               </button>
@@ -374,7 +722,7 @@ export default function AnalyzePage() {
               /* Video preview card */
               <div style={{ borderRadius: 20, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)", background: "#0E1410" }}>
 
-                {/* Video element with athlete picker overlay */}
+                {/* Video + canvas overlay */}
                 <div style={{ position: "relative", cursor: pickMode ? "crosshair" : "default" }} onClick={handleVideoClick}>
                   <video
                     ref={videoRef}
@@ -388,75 +736,96 @@ export default function AnalyzePage() {
                     }}
                     style={{ width: "100%", display: "block", maxHeight: 360, background: "#000", pointerEvents: pickMode ? "none" : "auto" }}
                   />
+                  {/* Canvas skeleton/HUD overlay */}
+                  <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 10 }} />
 
-                  {/* Athlete marker */}
-                  {markerPct !== null && (
-                    <div style={{ position: "absolute", top: 0, bottom: 0, left: `${markerPct}%`, transform: "translateX(-50%)", pointerEvents: "none" }}>
-                      <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 40, height: 40, borderRadius: "50%", border: "3px solid #10B981", boxShadow: "0 0 0 4px rgba(16,185,129,0.3)", background: "rgba(16,185,129,0.15)" }} />
-                      <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", width: 2, background: "rgba(16,185,129,0.4)", transform: "translateX(-50%)" }} />
-                    </div>
-                  )}
-
-                  {/* Pick mode overlay */}
+                  {/* Pick mode UI */}
                   {pickMode && (
-                    <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <div style={{ background: "rgba(10,15,13,0.9)", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 14, padding: "16px 24px", textAlign: "center" }}>
-                        <p style={{ color: "#10B981", fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Click on the athlete to track</p>
-                        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>Pause the video first for best results</p>
+                    <div style={{ position: "absolute", inset: 0, zIndex: 20, pointerEvents: "none" }}>
+                      {/* Scanline grid */}
+                      <div style={{ position: "absolute", inset: 0, backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(16,185,129,0.06) 40px), repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(16,185,129,0.06) 40px)" }} />
+                      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.38)" }} />
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ background: "rgba(5,15,10,0.88)", border: "1px solid rgba(16,185,129,0.45)", borderRadius: 14, padding: "14px 22px", textAlign: "center", backdropFilter: "blur(8px)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10B981", boxShadow: "0 0 8px #10B981" }} />
+                            <p style={{ color: "#10B981", fontWeight: 800, fontSize: 14, letterSpacing: "0.04em" }}>TAP TO LOCK ATHLETE</p>
+                          </div>
+                          <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 11 }}>Pause first for best precision</p>
+                        </div>
                       </div>
                     </div>
                   )}
                 </div>
 
-                {/* Clip name + pick controls */}
-                <div style={{ padding: "16px 20px", borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-                  {/* Rename */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                {/* Controls bar */}
+                <div style={{ padding: "14px 18px", borderTop: "1px solid rgba(255,255,255,0.07)", display: "flex", flexDirection: "column", gap: 12 }}>
+                  {/* Row 1: rename + overlay toggle */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {renamingClip ? (
-                      <input
-                        autoFocus
-                        value={clipName}
-                        onChange={e => setClipName(e.target.value)}
-                        onBlur={() => setRenamingClip(false)}
-                        onKeyDown={e => e.key === "Enter" && setRenamingClip(false)}
-                        style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(5,150,105,0.4)", borderRadius: 9, padding: "8px 12px", color: "white", fontSize: 15, fontWeight: 700, outline: "none", fontFamily: "var(--font-display)" }}
-                      />
+                      <input autoFocus value={clipName} onChange={e => setClipName(e.target.value)}
+                        onBlur={() => setRenamingClip(false)} onKeyDown={e => e.key === "Enter" && setRenamingClip(false)}
+                        style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(5,150,105,0.4)", borderRadius: 9, padding: "8px 12px", color: "white", fontSize: 15, fontWeight: 700, outline: "none", fontFamily: "var(--font-display)" }} />
                     ) : (
-                      <p style={{ flex: 1, fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: "white", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      <p style={{ flex: 1, fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 15, color: "white", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {clipName || file.name.replace(/\.[^.]+$/, "")}
                       </p>
                     )}
                     <button type="button" onClick={() => { if (!renamingClip) setClipName(clipName || file.name.replace(/\.[^.]+$/, "")); setRenamingClip(r => !r); }}
-                      style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "7px 12px", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+                      style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 8, padding: "6px 11px", cursor: "pointer", color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
                       {renamingClip ? "Done" : "Rename"}
                     </button>
+                    {/* Data Overlay toggle */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Overlay</span>
+                      <button type="button" onClick={() => setOverlayEnabled(v => !v)} style={{ position: "relative", width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer", background: overlayEnabled ? "#059669" : "rgba(255,255,255,0.1)", transition: "background 0.2s", flexShrink: 0 }}>
+                        <span style={{ position: "absolute", top: 2, left: overlayEnabled ? 20 : 2, width: 18, height: 18, borderRadius: "50%", background: "white", boxShadow: "0 1px 4px rgba(0,0,0,0.3)", transition: "left 0.2s" }} />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Athlete picker button */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {/* Row 1b: Set Thumbnail */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {customThumb && (
+                      <img src={customThumb} alt="thumb" style={{ width: 40, height: 28, objectFit: "cover", borderRadius: 5, border: "1px solid rgba(16,185,129,0.4)", flexShrink: 0 }} />
+                    )}
+                    <button type="button" onClick={handleSetThumbnail}
+                      style={{ flex: 1, padding: "8px 12px", borderRadius: 9, border: `1px solid ${customThumb ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.08)"}`, background: customThumb ? "rgba(16,185,129,0.07)" : "rgba(255,255,255,0.03)", color: customThumb ? "#34D399" : "rgba(255,255,255,0.35)", fontSize: 12, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>
+                      {customThumb ? "Thumbnail set — click to update" : "Set thumbnail from current frame"}
+                    </button>
+                    {customThumb && (
+                      <button type="button" onClick={() => setCustomThumb(undefined)} style={{ padding: "8px 10px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "rgba(255,255,255,0.2)", fontSize: 11, cursor: "pointer" }}>✕</button>
+                    )}
+                  </div>
+
+                  {/* Row 2: Athlete selection */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button type="button"
                       onClick={() => { setPickMode(p => !p); if (!pickMode) videoRef.current?.pause(); }}
-                      style={{ flex: 1, padding: "10px 16px", borderRadius: 10, border: `1px solid ${pickMode ? "rgba(16,185,129,0.5)" : "rgba(255,255,255,0.1)"}`, background: pickMode ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.04)", color: pickMode ? "#10B981" : "rgba(255,255,255,0.5)", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.15s" }}>
-                      {pickMode ? "Click on athlete in video ↑" : markerPct !== null ? "Athlete selected — click to change" : "Select athlete to track"}
+                      style={{ flex: 1, padding: "10px 14px", borderRadius: 10, border: `1px solid ${pickMode ? "rgba(16,185,129,0.55)" : markerPct !== null ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.1)"}`, background: pickMode ? "rgba(16,185,129,0.12)" : markerPct !== null ? "rgba(16,185,129,0.07)" : "rgba(255,255,255,0.04)", fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 18, height: 18, borderRadius: "50%", border: `2px solid ${markerPct !== null ? "#10B981" : "rgba(255,255,255,0.3)"}`, background: markerPct !== null ? "rgba(16,185,129,0.2)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {markerPct !== null && <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#10B981" }} />}
+                      </div>
+                      <span style={{ color: pickMode ? "#10B981" : markerPct !== null ? "#34D399" : "rgba(255,255,255,0.5)" }}>
+                        {pickMode ? "Tap athlete in frame ↑" : markerPct !== null ? "Athlete locked — tap to reselect" : "Select athlete to track"}
+                      </span>
                     </button>
                     {markerPct !== null && (
-                      <button type="button" onClick={() => { setTargetX(null); setMarkerPct(null); }}
+                      <button type="button" onClick={() => { setTargetX(null); setTargetY(null); setMarkerPct(null); }}
                         style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.3)", fontSize: 12, cursor: "pointer" }}>
                         Clear
                       </button>
                     )}
                   </div>
                   {markerPct === null && !pickMode && (
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", marginTop: 8 }}>
-                      Optional — if multiple athletes are in frame, pause the video and select who to track
-                    </p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.18)", marginTop: -4 }}>Optional — pause &amp; tap to lock onto a specific player. Skeleton &amp; HUD overlays update in real time.</p>
                   )}
                 </div>
 
                 {/* File info row */}
                 <div style={{ padding: "10px 20px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>{(file.size/1024/1024).toFixed(1)} MB</span>
-                  <button type="button" onClick={() => { setFile(null); setClipName(""); setTargetX(null); setMarkerPct(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.25)", fontSize: 12, fontWeight: 600 }}>
+                  <button type="button" onClick={() => { setFile(null); setClipName(""); setTargetX(null); setTargetY(null); setMarkerPct(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.25)", fontSize: 12, fontWeight: 600 }}>
                     Remove video
                   </button>
                 </div>
@@ -467,42 +836,94 @@ export default function AnalyzePage() {
               onChange={e => {
                 const f = e.target.files?.[0] ?? null;
                 setFile(f); setStatus("idle"); setResult(null);
-                setTargetX(null); setMarkerPct(null);
+                setTargetX(null); setTargetY(null); setMarkerPct(null);
+                setCustomThumb(undefined); setSettingThumb(false);
+                smoothX.current = null; smoothY.current = null;
                 if (f) setClipName(f.name.replace(/\.[^.]+$/, ""));
               }} disabled={isProcessing} />
 
-            {/* ── Trim controls ── */}
-            {file && videoDuration > 0 && (
-              <div style={{ borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: "18px 20px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                  <p style={{ fontWeight: 700, color: "rgba(255,255,255,0.7)", fontSize: 14 }}>Trim Video</p>
-                  <span style={{ fontSize: 11, fontWeight: 700, background: "rgba(5,150,105,0.15)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "3px 10px" }}>{(trimEnd-trimStart).toFixed(1)}s selected</span>
-                </div>
-                <div style={{ position: "relative", height: 36, background: "rgba(255,255,255,0.05)", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", marginBottom: 14 }}>
-                  <div style={{ position: "absolute", top: 0, height: "100%", background: "rgba(5,150,105,0.2)", borderLeft: "2px solid #059669", borderRight: "2px solid #0D9488", left: `${(trimStart/videoDuration)*100}%`, width: `${((trimEnd-trimStart)/videoDuration)*100}%` }} />
-                  <div style={{ position: "absolute", bottom: 3, left: 0, right: 0, display: "flex", justifyContent: "space-between", padding: "0 6px" }}>
-                    {[0,.25,.5,.75,1].map(p => <span key={p} style={{ fontSize: 9, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>{(p*videoDuration).toFixed(0)}s</span>)}
-                  </div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Start</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>{trimStart.toFixed(1)}s</span>
+            {/* ── Apple-style inline trim timeline ── */}
+            {file && videoDuration > 0 && (() => {
+              const startPct = (trimStart / videoDuration) * 100;
+              const endPct   = (trimEnd   / videoDuration) * 100;
+              const HANDLE   = 14; // handle width px
+
+              function onTrackPointer(e: React.PointerEvent<HTMLDivElement>, handle: "start" | "end") {
+                e.preventDefault();
+                const track = e.currentTarget.parentElement!;
+                const rect  = track.getBoundingClientRect();
+                const move  = (me: PointerEvent) => {
+                  const raw = Math.max(0, Math.min(1, (me.clientX - rect.left) / rect.width));
+                  const t   = raw * videoDuration;
+                  if (handle === "start") {
+                    const next = Math.min(t, trimEnd - 0.5);
+                    setTrimStart(next);
+                    if (videoRef.current) videoRef.current.currentTime = next;
+                  } else {
+                    const next = Math.max(t, trimStart + 0.5);
+                    setTrimEnd(next);
+                    if (videoRef.current) videoRef.current.currentTime = next;
+                  }
+                };
+                const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+                window.addEventListener("pointermove", move);
+                window.addEventListener("pointerup", up);
+              }
+
+              return (
+                <div style={{ borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)", padding: "16px 18px" }}>
+                  {/* Header */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <p style={{ fontWeight: 700, color: "rgba(255,255,255,0.6)", fontSize: 13 }}>Trim</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)" }}>{trimStart.toFixed(1)}s → {trimEnd.toFixed(1)}s</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, background: "rgba(5,150,105,0.15)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "2px 9px" }}>{(trimEnd - trimStart).toFixed(1)}s</span>
+                      <button type="button" onClick={() => { setTrimStart(0); setTrimEnd(videoDuration); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>Reset</button>
                     </div>
-                    <input type="range" min={0} max={videoDuration} step={0.1} value={trimStart} onChange={e => { const v = Math.min(parseFloat(e.target.value), trimEnd-0.5); setTrimStart(v); if (videoRef.current) videoRef.current.currentTime = v; }} style={{ width: "100%", accentColor: "#059669" }} />
                   </div>
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>End</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>{trimEnd.toFixed(1)}s</span>
+
+                  {/* Timeline track */}
+                  <div style={{ position: "relative", height: 44, userSelect: "none" }}>
+                    {/* Full track */}
+                    <div style={{ position: "absolute", inset: 0, background: "rgba(255,255,255,0.05)", borderRadius: 10, overflow: "hidden" }}>
+                      {/* Time ticks */}
+                      {[0, 0.25, 0.5, 0.75, 1].map(p => (
+                        <span key={p} style={{ position: "absolute", bottom: 4, left: `${p * 100}%`, transform: "translateX(-50%)", fontSize: 8, color: "rgba(255,255,255,0.2)", fontWeight: 600 }}>{(p * videoDuration).toFixed(0)}s</span>
+                      ))}
                     </div>
-                    <input type="range" min={0} max={videoDuration} step={0.1} value={trimEnd} onChange={e => { const v = Math.max(parseFloat(e.target.value), trimStart+0.5); setTrimEnd(v); if (videoRef.current) videoRef.current.currentTime = v; }} style={{ width: "100%", accentColor: "#059669" }} />
+
+                    {/* Dimmed left */}
+                    <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: `${startPct}%`, background: "rgba(0,0,0,0.45)", borderRadius: "10px 0 0 10px" }} />
+                    {/* Selected region */}
+                    <div style={{ position: "absolute", top: 0, bottom: 0, left: `${startPct}%`, width: `${endPct - startPct}%`, background: "rgba(5,150,105,0.18)", borderTop: "2px solid #059669", borderBottom: "2px solid #059669" }} />
+                    {/* Dimmed right */}
+                    <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: `${100 - endPct}%`, background: "rgba(0,0,0,0.45)", borderRadius: "0 10px 10px 0" }} />
+
+                    {/* Start handle */}
+                    <div
+                      onPointerDown={e => onTrackPointer(e, "start")}
+                      style={{ position: "absolute", top: 0, bottom: 0, left: `${startPct}%`, width: HANDLE, transform: "translateX(-50%)", cursor: "ew-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+                      <div style={{ width: HANDLE, height: "100%", background: "#059669", borderRadius: "8px 0 0 8px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "2px 0 8px rgba(5,150,105,0.4)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+                          {[0,1,2].map(i => <div key={i} style={{ width: 2, height: 2, borderRadius: "50%", background: "rgba(255,255,255,0.7)" }} />)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* End handle */}
+                    <div
+                      onPointerDown={e => onTrackPointer(e, "end")}
+                      style={{ position: "absolute", top: 0, bottom: 0, left: `${endPct}%`, width: HANDLE, transform: "translateX(-50%)", cursor: "ew-resize", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10 }}>
+                      <div style={{ width: HANDLE, height: "100%", background: "#0D9488", borderRadius: "0 8px 8px 0", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "-2px 0 8px rgba(13,148,136,0.4)" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2.5 }}>
+                          {[0,1,2].map(i => <div key={i} style={{ width: 2, height: 2, borderRadius: "50%", background: "rgba(255,255,255,0.7)" }} />)}
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <button type="button" onClick={() => { setTrimStart(0); setTrimEnd(videoDuration); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.2)", marginTop: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>Reset</button>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Progress */}
             {isProcessing && (
@@ -525,7 +946,16 @@ export default function AnalyzePage() {
 
             {status === "error" && (
               <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 14, padding: "14px 18px" }}>
-                <p style={{ color: "#FCA5A5", fontWeight: 600, fontSize: 14 }}>Error: {statusMsg}</p>
+                <p style={{ color: "#FCA5A5", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>
+                  {statusMsg.includes("fetch") || statusMsg.includes("Load failed") || statusMsg.includes("Network")
+                    ? "Backend offline — make sure the analysis server is running on localhost:8000"
+                    : `Error: ${statusMsg}`}
+                </p>
+                <p style={{ color: "rgba(255,100,100,0.5)", fontSize: 12 }}>
+                  {statusMsg.includes("fetch") || statusMsg.includes("Load failed") || statusMsg.includes("Network")
+                    ? "Run: cd soccer-biomechanics-ai && python main.py"
+                    : "Check your connection and try again."}
+                </p>
               </div>
             )}
 

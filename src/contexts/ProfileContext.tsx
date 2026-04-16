@@ -73,6 +73,9 @@ export interface AnalysisSession {
   // Raw kinematics (for details view)
   kinematics?: any;
   injuryRisk?: any;
+  // Per-frame bounding box track (pixel space, original video dimensions)
+  bboxTrack?: Array<{ x0: number; y0: number; x1: number; y1: number } | null>;
+  bboxMeta?:  { width: number; height: number };
 }
 
 export const DEFAULT_PROFILE: AthleteProfile = {

@@ -244,11 +244,15 @@ def extract_pose(video_path: str, target_x: Optional[float] = None) -> dict[str,
 
     frames_out: list[dict[str, Any]] = []
     frame_index   = 0
-    INIT_FRAMES   = 10                 # frames used to establish dominant person
-    IOU_THRESHOLD = 0.25               # min IoU to count as same person
+    INIT_FRAMES   = 5                  # frames used to establish dominant person (faster lock)
+    IOU_THRESHOLD = 0.15               # min IoU to count as same person (lowered for fast motion)
 
-    # Mutable tracking state (use list as container to allow mutation inside nested fn)
-    track: dict = {"locked_bbox": None, "init_votes": []}
+    # Mutable tracking state
+    track: dict = {
+        "locked_bbox":  None,
+        "init_votes":   [],
+        "prev_centers": [],   # last 5 hip-midpoint centers for velocity prediction
+    }
 
     def select_pose_index(pose_landmarks_list: list, width: int, height: int) -> int:
         """Return index of the pose that best matches our locked athlete."""
@@ -273,9 +277,23 @@ def extract_pose(video_path: str, target_x: Optional[float] = None) -> dict[str,
         if best_iou >= IOU_THRESHOLD:
             return int(np.argmax(ious))
 
-        # Fallback: largest bbox
-        areas = [_bbox_area(b) for b in bboxes]
-        return int(np.argmax(areas))
+        # IoU too low (athlete moved fast) — use velocity-based centroid prediction
+        prev = track["prev_centers"]
+        if len(prev) >= 2:
+            # Estimate velocity from last two known centers
+            vx = prev[-1][0] - prev[-2][0]
+            vy = prev[-1][1] - prev[-2][1]
+            pred_x = prev[-1][0] + vx
+            pred_y = prev[-1][1] + vy
+            centers = [_bbox_center(b) for b in bboxes]
+            dists = [((c[0] - pred_x) ** 2 + (c[1] - pred_y) ** 2) ** 0.5 for c in centers]
+            return int(np.argmin(dists))
+
+        # Final fallback: closest centroid to locked bbox center
+        locked_center = _bbox_center(locked)
+        centers = [_bbox_center(b) for b in bboxes]
+        dists = [((c[0] - locked_center[0]) ** 2 + (c[1] - locked_center[1]) ** 2) ** 0.5 for c in centers]
+        return int(np.argmin(dists))
 
     try:
         while True:
@@ -320,6 +338,11 @@ def extract_pose(video_path: str, target_x: Optional[float] = None) -> dict[str,
                             lb[2] * (1 - alpha) + chosen_bbox[2] * alpha,
                             lb[3] * (1 - alpha) + chosen_bbox[3] * alpha,
                         )
+                # Track centroid history for velocity-based prediction
+                center = _bbox_center(chosen_bbox)
+                track["prev_centers"].append(center)
+                if len(track["prev_centers"]) > 5:
+                    track["prev_centers"] = track["prev_centers"][-5:]
 
                 # Build landmark list in pixel space
                 for lm in chosen:

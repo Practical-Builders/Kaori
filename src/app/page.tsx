@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 export default function Landing() {
   const { profileComplete } = useProfile();
   const [mounted, setMounted] = useState(false);
+  // demo is now a dedicated route /demo
   useEffect(() => { setMounted(true); }, []);
 
   return (
@@ -19,7 +20,7 @@ export default function Landing() {
         background: "rgba(10,15,13,0.85)", backdropFilter: "blur(16px)",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Link href={mounted && profileComplete ? "/profile" : "/"} style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
           <div style={{
             width: 32, height: 32, borderRadius: 8,
             background: "linear-gradient(135deg, #059669, #0D9488)",
@@ -28,7 +29,7 @@ export default function Landing() {
             <span style={{ color: "white", fontWeight: 900, fontSize: 15, fontFamily: "var(--font-display)" }}>K</span>
           </div>
           <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: "white", letterSpacing: "0.12em" }}>KICKIQ</span>
-        </div>
+        </Link>
 
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {mounted && profileComplete ? (
@@ -65,8 +66,9 @@ export default function Landing() {
         {/* Background image */}
         <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
           <img
-            src="https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=1800&q=80"
+            src="https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&w=1800&q=80"
             alt="Female soccer athlete"
+            crossOrigin="anonymous"
             style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center 30%" }}
           />
           {/* Dark gradient overlay — stronger on left */}
@@ -122,6 +124,14 @@ export default function Landing() {
                   }}>
                     Add Video
                   </Link>
+                  <Link href="/demo" style={{
+                    display: "inline-flex", alignItems: "center", gap: 10, padding: "16px 32px", borderRadius: 10,
+                    background: "rgba(255,255,255,0.06)", color: "white", fontWeight: 600, fontSize: 16,
+                    border: "1px solid rgba(255,255,255,0.14)", textDecoration: "none",
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Watch Demo
+                  </Link>
                 </>
               ) : (
                 <>
@@ -132,12 +142,13 @@ export default function Landing() {
                   }}>
                     Create Account
                   </Link>
-                  <Link href="/analyze" style={{
-                    display: "inline-block", padding: "16px 32px", borderRadius: 10,
-                    background: "rgba(255,255,255,0.08)", color: "white", fontWeight: 600, fontSize: 16,
-                    textDecoration: "none", border: "1px solid rgba(255,255,255,0.12)",
+                  <Link href="/demo" style={{
+                    display: "inline-flex", alignItems: "center", gap: 10, padding: "16px 32px", borderRadius: 10,
+                    background: "rgba(255,255,255,0.06)", color: "white", fontWeight: 600, fontSize: 16,
+                    border: "1px solid rgba(255,255,255,0.14)", textDecoration: "none",
                   }}>
-                    Try Without Account
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Watch Demo
                   </Link>
                 </>
               )}
@@ -167,19 +178,19 @@ export default function Landing() {
                 step: "01",
                 title: "Upload Your Video",
                 desc: "Upload any training or match footage. Trim it to the clip you want analyzed. Supports MP4, MOV, and WebM.",
-                image: "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=600&q=80",
+                image: "/step01.jpg",
               },
               {
                 step: "02",
                 title: "AI Pose Analysis",
                 desc: "MediaPipe tracks 33 body landmarks per frame. The engine computes joint angles, speed, stride cadence, and torque.",
-                image: "https://images.unsplash.com/photo-1551698618-1dfe5d97d256?auto=format&fit=crop&w=600&q=80",
+                image: "/pose-analysis.jpg",
               },
               {
                 step: "03",
                 title: "Review Your Data",
                 desc: "Receive a factual biomechanical report covering peak speed, movement symmetry, injury risk flags, and training recommendations.",
-                image: "https://images.unsplash.com/photo-1560272564-c83b66b1ad12?auto=format&fit=crop&w=600&q=80",
+                image: "/step03.jpg",
               },
             ].map((item) => (
               <div key={item.step} style={{ background: "#141A17", overflow: "hidden" }}>
@@ -187,6 +198,7 @@ export default function Landing() {
                   <img
                     src={item.image}
                     alt={item.title}
+                    crossOrigin="anonymous"
                     style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                   />
                 </div>
@@ -237,13 +249,6 @@ export default function Landing() {
             }}>
               Create Free Account
             </Link>
-            <Link href="/analyze" style={{
-              display: "inline-block", padding: "16px 36px", borderRadius: 10,
-              background: "transparent", color: "rgba(255,255,255,0.6)", fontWeight: 600, fontSize: 16,
-              textDecoration: "none", border: "1px solid rgba(255,255,255,0.12)",
-            }}>
-              Try Without Account
-            </Link>
           </div>
         </div>
       </section>
@@ -253,6 +258,7 @@ export default function Landing() {
         <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 14, color: "rgba(255,255,255,0.3)", letterSpacing: "0.1em" }}>KICKIQ</span>
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.2)" }}>For educational and training purposes only. Not a medical diagnostic tool.</p>
       </footer>
+
     </main>
   );
 }

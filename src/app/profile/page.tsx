@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useProfile, AthleteProfile, AnalysisSession } from "@/contexts/ProfileContext";
+import { getVideo, getPoseFrames, saveVideo, PoseData } from "@/lib/videoStorage";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
@@ -15,6 +16,95 @@ const THEME_KEY   = "kickiq_theme";
 const POSITIONS = ["Goalkeeper","Defender","Center Back","Full Back","Midfielder",
   "Defensive Mid","Central Mid","Attacking Mid","Winger","Forward","Striker"];
 const YEARS = ["Freshman","Sophomore","Junior","Senior","Graduate","Professional","Youth Academy"];
+const CONV_KEY = "kickiq_conversations";
+
+// ── Messaging types ───────────────────────────────────────────────────────────
+type ChatMessage = { id: string; from: "me" | "them"; text: string; ts: string };
+type Conversation = {
+  id: string;
+  participantId: string;
+  participantName: string;
+  participantRole: "athlete" | "recruiter";
+  participantInitial: string;
+  unread: number;
+  messages: ChatMessage[];
+};
+
+// ── Mock athletes (Scout Board seed data) ────────────────────────────────────
+type MockAthlete = {
+  id: string; name: string; age: number; position: string; club: string;
+  location: string; peakSpeedMs: number; symmetryScore: number;
+  overallRisk: "low" | "moderate" | "high"; nationality: string;
+  heightCm: number; weightKg: number; photoInitial: string;
+};
+const MOCK_ATHLETES: MockAthlete[] = [
+  { id: "ma1", name: "Diego Morales",   age: 19, position: "Winger",        club: "FC Valencia B",    location: "Valencia, ESP",    peakSpeedMs: 9.8,  symmetryScore: 87, overallRisk: "low",      nationality: "Spanish",    heightCm: 174, weightKg: 68, photoInitial: "D" },
+  { id: "ma2", name: "Liam Okafor",     age: 20, position: "Striker",       club: "Ajax Academy",     location: "Amsterdam, NED",   peakSpeedMs: 9.3,  symmetryScore: 82, overallRisk: "low",      nationality: "Nigerian",   heightCm: 181, weightKg: 76, photoInitial: "L" },
+  { id: "ma3", name: "Kenji Yamamoto",  age: 18, position: "Central Mid",   club: "Gamba Osaka U-18", location: "Osaka, JPN",       peakSpeedMs: 8.7,  symmetryScore: 91, overallRisk: "low",      nationality: "Japanese",   heightCm: 172, weightKg: 65, photoInitial: "K" },
+  { id: "ma4", name: "Marco Esposito",  age: 21, position: "Defender",      club: "AS Roma Youth",    location: "Rome, ITA",        peakSpeedMs: 8.2,  symmetryScore: 78, overallRisk: "moderate", nationality: "Italian",    heightCm: 183, weightKg: 79, photoInitial: "M" },
+  { id: "ma5", name: "Rasheed Al-Amri", age: 19, position: "Attacking Mid", club: "Al-Nassr U-21",    location: "Riyadh, KSA",      peakSpeedMs: 9.1,  symmetryScore: 85, overallRisk: "low",      nationality: "Saudi",      heightCm: 176, weightKg: 70, photoInitial: "R" },
+  { id: "ma6", name: "Tyler Rousseau",  age: 22, position: "Goalkeeper",    club: "CF Montréal Res.",  location: "Montreal, CAN",    peakSpeedMs: 7.4,  symmetryScore: 80, overallRisk: "low",      nationality: "Canadian",   heightCm: 189, weightKg: 83, photoInitial: "T" },
+  { id: "ma7", name: "Sofia Chen",      age: 20, position: "Defensive Mid", club: "Portland Thorns II",location: "Portland, USA",    peakSpeedMs: 8.5,  symmetryScore: 88, overallRisk: "low",      nationality: "American",   heightCm: 168, weightKg: 62, photoInitial: "S" },
+  { id: "ma8", name: "Enzo Fernandez",  age: 21, position: "Forward",       club: "River Plate B",    location: "Buenos Aires, ARG",peakSpeedMs: 9.5,  symmetryScore: 74, overallRisk: "moderate", nationality: "Argentine",  heightCm: 179, weightKg: 74, photoInitial: "E" },
+];
+
+// ── Seed conversations ────────────────────────────────────────────────────────
+function getOrSeedConversations(): Conversation[] {
+  try {
+    const raw = localStorage.getItem(CONV_KEY);
+    if (raw) return JSON.parse(raw) as Conversation[];
+    const seed: Conversation[] = [
+      {
+        id: "conv_001",
+        participantId: "ma1",
+        participantName: "Diego Morales",
+        participantRole: "athlete",
+        participantInitial: "D",
+        unread: 1,
+        messages: [
+          { id: "m1", from: "them", text: "Hey! I saw your profile on KickIQ. I'm really interested in your program.", ts: new Date(Date.now() - 86400000 * 2).toISOString() },
+          { id: "m2", from: "me",   text: "Hi Diego! Great to hear from you. Your speed numbers are impressive — 9.8 m/s peak.", ts: new Date(Date.now() - 86400000).toISOString() },
+          { id: "m3", from: "them", text: "Thanks! I've been working hard on my acceleration this preseason.", ts: new Date(Date.now() - 3600000).toISOString() },
+        ],
+      },
+      {
+        id: "conv_002",
+        participantId: "ma3",
+        participantName: "Kenji Yamamoto",
+        participantRole: "athlete",
+        participantInitial: "K",
+        unread: 0,
+        messages: [
+          { id: "m4", from: "them", text: "Coach, do you have time for a call this week? I want to discuss the scholarship options.", ts: new Date(Date.now() - 86400000 * 5).toISOString() },
+          { id: "m5", from: "me",   text: "Absolutely, Kenji. How about Thursday at 3 PM your time?", ts: new Date(Date.now() - 86400000 * 4).toISOString() },
+          { id: "m6", from: "them", text: "Perfect! I'll make sure to prepare some questions.", ts: new Date(Date.now() - 86400000 * 4 + 3600000).toISOString() },
+        ],
+      },
+    ];
+    localStorage.setItem(CONV_KEY, JSON.stringify(seed));
+    return seed;
+  } catch { return []; }
+}
+
+// ── Auto-reply generator ─────────────────────────────────────────────────────
+function generateAutoReply(participantRole: "athlete" | "recruiter"): string {
+  const athleteReplies = [
+    "Thanks for reaching out! I'd love to learn more about your program.",
+    "That's great to hear! I've been training really hard this season.",
+    "Absolutely, I'd be happy to send over my highlight reel.",
+    "Thanks coach! I've always dreamed of playing at that level.",
+    "I appreciate the interest! When would be a good time to chat?",
+  ];
+  const recruiterReplies = [
+    "Great question. I'll review your latest session footage before our call.",
+    "We have some exciting opportunities available. Let's set up a time to talk.",
+    "I'll get back to you with the full scholarship breakdown by end of week.",
+    "Thanks for your interest! Our program is a great fit for your profile.",
+    "I've shared your stats with our coaching staff. Very promising numbers.",
+  ];
+  const pool = participantRole === "athlete" ? athleteReplies : recruiterReplies;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function riskColor(l?: string) {
@@ -28,15 +118,369 @@ function riskLabel(l?: string) {
   return "Attention";
 }
 
+// ── Session thumbnail pool (soccer action shots) ──────────────────────────────
+const SESSION_THUMBS = [
+  "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=900&q=80",
+  "https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=900&q=80",
+];
+
 // ── Explore content ───────────────────────────────────────────────────────────
 const EXPLORE = [
-  { cat: "Training", title: "5 Speed Drills for Midfielders", source: "UEFA", url: "https://www.uefa.com/nationalassociations/uefaregulations/technicalreports/", img: "https://images.unsplash.com/photo-1551698618-1dfe5d97d256?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Fitness",  title: "Injury Prevention for Young Athletes", source: "FIFA", url: "https://www.fifa.com/technical/football-medicine/", img: "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Tactics",  title: "Pressing Triggers & High Press", source: "FC Barcelona", url: "https://www.fcbarcelona.com/en/football/first-team", img: "https://images.unsplash.com/photo-1526676037777-05a232554f77?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Nutrition","title": "Fueling Performance: Pre-Match Diet", source: "Sports Science", url: "https://www.gssiweb.org/sports-science-exchange/article/sse-180-fueling-for-sport", img: "https://images.unsplash.com/photo-1547347298-4074fc3086f0?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Recruiting","title":"How College Coaches Find Prospects", source: "NSCAA", url: "https://www.nscaa.com/resources/college-recruiting", img: "https://images.unsplash.com/photo-1560272564-c83b66b1ad12?auto=format&fit=crop&w=400&q=80" },
-  { cat: "Training", title: "Ball Mastery: 15-Min Daily Routine", source: "Coerver", url: "https://www.coerver.com/", img: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=400&q=80" },
+  { cat: "Training",   title: "5 Speed Drills for Midfielders",        source: "UEFA",          url: "https://www.uefa.com/nationalassociations/uefaregulations/technicalreports/", img: "https://images.unsplash.com/photo-1543326727-cf6c39e8f84c?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Fitness",    title: "Injury Prevention for Young Athletes",   source: "FIFA",          url: "https://www.fifa.com/technical/football-medicine/",                          img: "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Tactics",    title: "Pressing Triggers & High Press",         source: "FC Barcelona",  url: "https://www.fcbarcelona.com/en/football/first-team",                        img: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Nutrition",  title: "Fueling Performance: Pre-Match Diet",    source: "Sports Science",url: "https://www.gssiweb.org/sports-science-exchange/article/sse-180-fueling-for-sport", img: "https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Recruiting", title: "How College Coaches Find Prospects",     source: "NSCAA",         url: "https://www.nscaa.com/resources/college-recruiting",                        img: "https://images.unsplash.com/photo-1517466787929-bc90951d0974?auto=format&fit=crop&w=600&q=80" },
+  { cat: "Training",   title: "Ball Mastery: 15-Min Daily Routine",     source: "Coerver",       url: "https://www.coerver.com/",                                                  img: "https://images.unsplash.com/photo-1431324155629-1a6deb1dec8d?auto=format&fit=crop&w=600&q=80" },
 ];
+
+// ── Skeleton drawing helpers (same coordinate system as analyze page) ─────────
+const SKEL_LM: Record<string, number> = {
+  nose: 0, lShoulder: 11, rShoulder: 12,
+  lElbow: 13, rElbow: 14, lWrist: 15, rWrist: 16,
+  lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28,
+};
+const SKEL_BONES: [string, string][] = [
+  ["nose","neck"],
+  ["neck","lShoulder"],["neck","rShoulder"],
+  ["lShoulder","lElbow"],["lElbow","lWrist"],
+  ["rShoulder","rElbow"],["rElbow","rWrist"],
+  ["neck","lHip"],["neck","rHip"],
+  ["lHip","rHip"],
+  ["lHip","lKnee"],["lKnee","lAnkle"],
+  ["rHip","rKnee"],["rKnee","rAnkle"],
+];
+
+function skelLmToCanvas(lx: number, ly: number, cW: number, cH: number, vW: number, vH: number) {
+  const va = vW / vH, ca = cW / cH;
+  let rW: number, rH: number, ox: number, oy: number;
+  if (va > ca) { rW = cW; rH = cW / va; ox = 0;        oy = (cH - rH) / 2; }
+  else          { rH = cH; rW = cH * va; oy = 0;        ox = (cW - rW) / 2; }
+  return { x: ox + (lx / vW) * rW, y: oy + (ly / vH) * rH };
+}
+
+function buildJoints(
+  lms: any[], cW: number, cH: number, vW: number, vH: number,
+): Record<string, { x: number; y: number; z: number }> | null {
+  if (!lms || lms.length < 29) return null;
+  const j: Record<string, { x: number; y: number; z: number }> = {};
+  for (const [name, idx] of Object.entries(SKEL_LM)) {
+    const lm = lms[idx];
+    if (!lm || (lm.visibility ?? 1) < 0.12) continue;
+    const { x, y } = skelLmToCanvas(lm.x, lm.y, cW, cH, vW, vH);
+    j[name] = { x, y, z: lm.z ?? 0 };
+  }
+  if (!j.nose || (!j.lHip && !j.rHip)) return null;
+  if (j.lShoulder && j.rShoulder)
+    j.neck = { x: (j.lShoulder.x + j.rShoulder.x) / 2, y: (j.lShoulder.y + j.rShoulder.y) / 2, z: ((j.lShoulder.z ?? 0) + (j.rShoulder.z ?? 0)) / 2 };
+  return j;
+}
+
+function drawSkeleton3D(
+  ctx: CanvasRenderingContext2D,
+  j: Record<string, { x: number; y: number; z: number }>,
+  color: string,
+) {
+  const zA = (name: string) => Math.max(0.4, Math.min(1, 0.72 + (-(j[name]?.z ?? 0)) * 1.4));
+
+  SKEL_BONES.forEach(([a, b]) => {
+    if (!j[a] || !j[b]) return;
+    const alpha = (zA(a) + zA(b)) / 2;
+    const depth = ((j[a].z) + (j[b].z)) / 2;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color; ctx.shadowBlur = 10 * alpha;
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.5, 4 + (-depth) * 5);
+    ctx.beginPath(); ctx.moveTo(j[a].x, j[a].y); ctx.lineTo(j[b].x, j[b].y); ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+
+  // Draw joints back-to-front (higher z = further away, lower z = closer)
+  const sorted = Object.entries(j)
+    .filter(([n]) => n !== "neck")
+    .sort(([, a], [, b]) => b.z - a.z);
+
+  sorted.forEach(([name, pos]) => {
+    const alpha = zA(name);
+    const r = (name === "nose" ? 8 : 5) + (-(pos.z)) * 4;
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color; ctx.shadowBlur = 8 * alpha;
+    ctx.beginPath(); ctx.arc(pos.x, pos.y, Math.max(2, r), 0, Math.PI * 2);
+    ctx.fillStyle = name === "nose" ? "rgba(255,255,255,0.95)" : color;
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+}
+
+// ── Session Video Modal ────────────────────────────────────────────────────────
+function SessionVideoModal({ session, onClose }: { session: AnalysisSession; onClose: () => void }) {
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef    = useRef<number>(0);
+  const trailRef  = useRef<Array<{ x: number; y: number }>>([]);
+  const [videoUrl,  setVideoUrl]  = useState<string | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [poseData,  setPoseData]  = useState<PoseData | null>(null);
+  const [hudVisible, setHudVisible] = useState(false);
+
+  // Load video + pose frames from IndexedDB
+  useEffect(() => {
+    let url = "";
+    setLoading(true);
+    trailRef.current = [];
+    Promise.all([
+      getVideo(session.id),
+      getPoseFrames(session.id),
+    ]).then(([file, pose]) => {
+      if (file) { url = URL.createObjectURL(file); setVideoUrl(url); }
+      if (pose) setPoseData(pose);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [session.id]);
+
+  // File picker fallback — user can locate their video manually
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setVideoUrl(url);
+    saveVideo(session.id, f).catch(() => {});
+  }
+
+  // Draw skeleton + overlay every frame
+  const draw = useCallback(() => {
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) { rafRef.current = requestAnimationFrame(draw); return; }
+
+    // Sync canvas pixel resolution to its CSS display size
+    const dW = canvas.offsetWidth, dH = canvas.offsetHeight;
+    if (dW > 0 && (canvas.width !== dW || canvas.height !== dH)) {
+      canvas.width = dW; canvas.height = dH;
+    }
+    const cW = canvas.width, cH = canvas.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx || !cW || !cH) { rafRef.current = requestAnimationFrame(draw); return; }
+    ctx.clearRect(0, 0, cW, cH);
+
+    const tMs = video.currentTime * 1000;
+
+    // ── If we have real pose data, draw full 3D skeleton + trail ─────────────
+    if (poseData && poseData.frames.length > 0) {
+      const { frames, metadata: { width: vW, height: vH } } = poseData;
+
+      // Find closest frame by timestamp
+      let best = 0, bestDiff = Infinity;
+      for (let i = 0; i < frames.length; i++) {
+        const d = Math.abs(frames[i].timestamp_ms - tMs);
+        if (d < bestDiff) { bestDiff = d; best = i; }
+      }
+      const lms    = frames[best]?.landmarks ?? null;
+      const joints = lms ? buildJoints(lms, cW, cH, vW, vH) : null;
+
+      if (joints) {
+        const lh = joints.lHip, rh = joints.rHip;
+        const cx = lh && rh ? (lh.x + rh.x) / 2 : (lh ?? rh)!.x;
+        const cy = lh && rh ? (lh.y + rh.y) / 2 : (lh ?? rh)!.y;
+
+        // Motion trail — only accumulate while playing
+        if (!video.paused && !video.ended) {
+          trailRef.current.push({ x: cx, y: cy });
+          if (trailRef.current.length > 60) trailRef.current.shift();
+        }
+        const trail = trailRef.current;
+        if (trail.length > 1) {
+          ctx.lineCap = "round";
+          for (let i = 1; i < trail.length; i++) {
+            const t = i / trail.length;
+            ctx.beginPath();
+            ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+            ctx.lineTo(trail[i].x, trail[i].y);
+            ctx.strokeStyle = "#34D399";
+            ctx.lineWidth   = 1.5 + t * 3.5;
+            ctx.globalAlpha = t * 0.55;
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+        }
+
+        // Real 3D skeleton
+        drawSkeleton3D(ctx, joints, "#34D399");
+
+        // Speed HUD above head
+        const headX = joints.nose?.x ?? cx;
+        const headY = joints.nose?.y ?? cy - cH * 0.2;
+        const hudY  = headY - 34;
+        const spd   = session.peakSpeedMs ? `${session.peakSpeedMs.toFixed(1)} m/s` : "— m/s";
+        ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+        ctx.fillStyle  = "rgba(0,0,0,0.75)";
+        ctx.beginPath();
+        (ctx as any).roundRect?.(headX - 44, hudY - 13, 88, 26, 7) ?? ctx.rect(headX - 44, hudY - 13, 88, 26);
+        ctx.fill();
+        ctx.strokeStyle = "#34D399"; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.fillStyle   = "#34D399"; ctx.font = "bold 12px monospace";
+        ctx.textAlign   = "center";  ctx.textBaseline = "middle";
+        ctx.fillText(spd, headX, hudY);
+        ctx.beginPath();
+        ctx.moveTo(headX, hudY + 13); ctx.lineTo(headX, headY - 10);
+        ctx.strokeStyle = "rgba(52,211,153,0.4)"; ctx.lineWidth = 1; ctx.stroke();
+      }
+    } else if (session.bboxTrack && video.duration) {
+      // Fallback: bounding box only (no pose data)
+      const track  = session.bboxTrack;
+      const vW     = session.bboxMeta?.width  ?? 1;
+      const vH     = session.bboxMeta?.height ?? 1;
+      const sc     = Math.min(cW / vW, cH / vH);
+      const padX   = (cW - vW * sc) / 2;
+      const padY   = (cH - vH * sc) / 2;
+      const fi     = Math.min(track.length - 1, Math.floor((video.currentTime / video.duration) * track.length));
+      const box    = track[fi];
+      if (box) {
+        const tlx = padX + box.x0 * sc, tly = padY + box.y0 * sc;
+        const brx = padX + box.x1 * sc, bry = padY + box.y1 * sc;
+        const bW  = brx - tlx, bH = bry - tly;
+        const cl  = Math.min(bW, bH) * 0.18;
+        ctx.shadowColor = "#34D399"; ctx.shadowBlur = 14;
+        ctx.strokeStyle = "#34D399"; ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(tlx,      tly + cl); ctx.lineTo(tlx,      tly); ctx.lineTo(tlx + cl, tly);
+        ctx.moveTo(brx - cl, tly);      ctx.lineTo(brx,      tly); ctx.lineTo(brx,      tly + cl);
+        ctx.moveTo(brx,      bry - cl); ctx.lineTo(brx,      bry); ctx.lineTo(brx - cl, bry);
+        ctx.moveTo(tlx + cl, bry);      ctx.lineTo(tlx,      bry); ctx.lineTo(tlx,      bry - cl);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle  = "rgba(52,211,153,0.05)";
+        ctx.fillRect(tlx, tly, bW, bH);
+        ctx.fillStyle = "#34D399"; ctx.font = "bold 9px monospace"; ctx.textAlign = "left";
+        ctx.fillText("ATHLETE", tlx + 4, tly - 5);
+      }
+    }
+
+    rafRef.current = requestAnimationFrame(draw);
+  }, [session, poseData]);
+
+  useEffect(() => {
+    rafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [draw, videoUrl]);
+
+  // Metrics for HUD popup
+  const riskColor = (r?: string) =>
+    r === "low" ? "#10B981" : r === "moderate" ? "#F59E0B" : r === "high" ? "#EF4444" : "#6B7280";
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.88)", backdropFilter: "blur(10px)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}
+      onClick={onClose}
+    >
+      <div
+        style={{ position: "relative", width: "min(92vw,900px)", background: "#0A1410", borderRadius: 20, overflow: "hidden", boxShadow: "0 40px 80px rgba(0,0,0,0.7)", border: "1px solid rgba(52,211,153,0.18)" }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div>
+            <p style={{ color: "white", fontWeight: 800, fontSize: 14, fontFamily: "var(--font-display)" }}>{session.videoName}</p>
+            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{new Date(session.date).toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</p>
+          </div>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+        </div>
+
+        {/* Video + canvas */}
+        <div style={{ position: "relative", background: "black", lineHeight: 0, minHeight: loading ? 320 : undefined }}>
+          {loading && (
+            <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 32, height: 32, border: "3px solid rgba(52,211,153,0.2)", borderTopColor: "#34D399", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
+                <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}>Loading…</span>
+              </div>
+            </div>
+          )}
+          {!loading && !videoUrl && (
+            <div style={{ height: 320, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+              <span style={{ fontSize: 40 }}>🎬</span>
+              <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, textAlign: "center", maxWidth: 280 }}>
+                Video file not stored yet.<br/>Re-analyze to auto-save, or locate it manually:
+              </span>
+              <label style={{ cursor: "pointer", padding: "8px 18px", background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.35)", borderRadius: 8, color: "#34D399", fontSize: 12, fontWeight: 700 }}>
+                Select video file
+                <input type="file" accept="video/*" style={{ display: "none" }} onChange={handleFilePick} />
+              </label>
+            </div>
+          )}
+          {videoUrl && (
+            <>
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                controls
+                playsInline
+                style={{ width: "100%", maxHeight: "62vh", display: "block" }}
+              />
+              {/* Canvas overlay — same size as video via CSS; intrinsic size synced in draw loop */}
+              <canvas
+                ref={canvasRef}
+                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+              />
+            </>
+          )}
+        </div>
+
+        {/* Footer quick stats + skeleton indicator */}
+        <div style={{ padding: "12px 18px", display: "flex", gap: 20, flexWrap: "wrap", borderTop: "1px solid rgba(255,255,255,0.06)", alignItems: "center" }}>
+          {session.peakSpeedMs   && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>PEAK SPEED</p><p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{session.peakSpeedMs.toFixed(1)} <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>m/s</span></p></div>}
+          {session.symmetryScore && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>SYMMETRY</p><p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{session.symmetryScore.toFixed(0)} <span style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>%</span></p></div>}
+          {session.strideCount   && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>STRIDES</p><p style={{ color: "white", fontWeight: 800, fontSize: 15 }}>{session.strideCount}</p></div>}
+          {session.overallRisk   && <div><p style={{ color: "rgba(255,255,255,0.35)", fontSize: 9, fontWeight: 700, marginBottom: 2 }}>RISK</p><p style={{ fontWeight: 800, fontSize: 15, color: riskColor(session.overallRisk), textTransform: "capitalize" }}>{session.overallRisk}</p></div>}
+          <button onClick={() => setHudVisible(v => !v)} style={{ marginLeft: "auto", padding: "6px 14px", borderRadius: 8, background: hudVisible ? "rgba(52,211,153,0.2)" : "rgba(52,211,153,0.08)", border: `1px solid ${hudVisible ? "rgba(52,211,153,0.5)" : "rgba(52,211,153,0.2)"}`, color: "#34D399", fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            {hudVisible ? "Hide Stats" : "Live Stats"}
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: poseData ? "#34D399" : session.bboxTrack ? "#F59E0B" : "#4B5563" }} />
+            <span style={{ color: "rgba(255,255,255,0.35)", fontSize: 10 }}>
+              {poseData ? "3D skeleton active" : session.bboxTrack ? "Tracking active" : "Re-analyze to enable skeleton"}
+            </span>
+          </div>
+        </div>
+      </div>
+      {hudVisible && (
+        <div style={{ background: "rgba(6,14,10,0.98)", borderTop: "1px solid rgba(52,211,153,0.25)", padding: "14px 18px" }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>PEAK SPEED</p>
+              <p style={{ color: "white", fontWeight: 900, fontSize: 24, lineHeight: 1 }}>{session.peakSpeedMs?.toFixed(1) ?? "—"}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>m/s</span></p>
+            </div>
+            <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>SYMMETRY SCORE</p>
+              <p style={{ color: "white", fontWeight: 900, fontSize: 24, lineHeight: 1 }}>{session.symmetryScore?.toFixed(0) ?? "—"}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginLeft: 4 }}>%</span></p>
+            </div>
+            <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+              <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>INJURY RISK</p>
+              <p style={{ fontWeight: 900, fontSize: 20, color: riskColor(session.overallRisk), textTransform: "capitalize" }}>{session.overallRisk ?? "—"}</p>
+              {(session as any).injuryRisk?.risk_categories && (
+                <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                  {Object.entries((session as any).injuryRisk.risk_categories).map(([k, v]: [string, any]) => (
+                    <span key={k} style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 100, background: `${riskColor(v?.level)}18`, color: riskColor(v?.level), textTransform: "capitalize" }}>{k.replace(/_/g," ")}: {v?.level}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+            {session.strideCount && (
+              <div style={{ flex: 1, minWidth: 100, background: "rgba(52,211,153,0.07)", borderRadius: 10, padding: "10px 14px", border: "1px solid rgba(52,211,153,0.15)" }}>
+                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 9, fontWeight: 700, marginBottom: 4, letterSpacing: "0.08em" }}>STRIDES</p>
+                <p style={{ color: "white", fontWeight: 900, fontSize: 24, lineHeight: 1 }}>{session.strideCount}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
 
 // ── Progress Charts Tab ────────────────────────────────────────────────────────
 function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark: boolean }) {
@@ -105,7 +549,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {/* Summary stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
         {[
           { label: "Best Speed", value: `${bestSpeed} m/s`, sub: "peak recorded", color: "#10B981" },
           { label: "Avg Speed", value: `${avgSpeed} m/s`, sub: "across sessions", color: "#34D399" },
@@ -115,7 +559,7 @@ function ProgressTab({ sessions, isDark }: { sessions: AnalysisSession[]; isDark
         ].map(d => (
           <div key={d.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "18px 16px" }}>
             <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>{d.label}</p>
-            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26, color: d.color, lineHeight: 1 }}>{d.value}</p>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: d.color, lineHeight: 1 }}>{d.value}</p>
             <p style={{ fontSize: 11, color: text2, marginTop: 6 }}>{d.sub}</p>
           </div>
         ))}
@@ -317,7 +761,7 @@ function SessionCard({ session, onRemove, pinned, onPin, selected, onSelect }: {
           {session.overallRisk && <span style={{ fontSize: 10, fontWeight: 800, color: rc.color, background: `${rc.color}18`, border: `1px solid ${rc.color}40`, borderRadius: 20, padding: "3px 8px" }}>{rc.label}</span>}
           {/* Pin button */}
           <button onClick={e => { e.stopPropagation(); onPin(); }} style={{ width: 28, height: 28, borderRadius: "50%", background: pinned ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${pinned ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)"}`, cursor: "pointer", color: pinned ? "#FBBF24" : "rgba(255,255,255,0.25)", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            ★
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           </button>
           <button onClick={e => { e.stopPropagation(); onRemove(); }} style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", color: "rgba(255,255,255,0.2)", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           <span style={{ color: open ? "#10B981" : "rgba(255,255,255,0.2)", fontSize: 12 }}>{open ? "▲" : "▼"}</span>
@@ -361,6 +805,277 @@ function SessionCard({ session, onRemove, pinned, onPin, selected, onSelect }: {
               <p style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", lineHeight: 1.6, marginTop: 8 }}>{session.geminiSummary}</p>
             </details>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Messaging Panel ──────────────────────────────────────────────────────────
+function MessagingPanel({
+  isDark, bg, card, border, text1, text2,
+  activeMsgConvId, setActiveMsgConvId,
+  openWithAthleteId,
+  isRecruiter,
+}: {
+  isDark: boolean; bg: string; card: string; border: string; text1: string; text2: string;
+  activeMsgConvId: string | null; setActiveMsgConvId: (id: string | null) => void;
+  openWithAthleteId: string | null;
+  isRecruiter: boolean;
+}) {
+  const [convs, setConvs] = useState<Conversation[]>([]);
+  const [search, setSearch] = useState("");
+  const [input, setInput] = useState("");
+  const [newMsgOpen, setNewMsgOpen] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Load/seed conversations
+  useEffect(() => {
+    setConvs(getOrSeedConversations());
+  }, []);
+
+  // If openWithAthleteId is set, open or create that conversation
+  useEffect(() => {
+    if (!openWithAthleteId) return;
+    setConvs(prev => {
+      const existing = prev.find(c => c.participantId === openWithAthleteId);
+      if (existing) {
+        setActiveMsgConvId(existing.id);
+        return prev;
+      }
+      const athlete = MOCK_ATHLETES.find(a => a.id === openWithAthleteId);
+      if (!athlete) return prev;
+      const newConv: Conversation = {
+        id: `conv_${Date.now()}`,
+        participantId: athlete.id,
+        participantName: athlete.name,
+        participantRole: "athlete",
+        participantInitial: athlete.photoInitial,
+        unread: 0,
+        messages: [],
+      };
+      const updated = [newConv, ...prev];
+      try { localStorage.setItem(CONV_KEY, JSON.stringify(updated)); } catch {}
+      setActiveMsgConvId(newConv.id);
+      return updated;
+    });
+  }, [openWithAthleteId]);
+
+  // Scroll to bottom when active conv changes or messages added
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeMsgConvId, convs]);
+
+  function persistConvs(updated: Conversation[]) {
+    try { localStorage.setItem(CONV_KEY, JSON.stringify(updated)); } catch {}
+    setConvs(updated);
+  }
+
+  function sendMessage() {
+    if (!input.trim() || !activeMsgConvId) return;
+    const msg: ChatMessage = { id: `m_${Date.now()}`, from: "me", text: input.trim(), ts: new Date().toISOString() };
+    const updated = convs.map(c => c.id === activeMsgConvId
+      ? { ...c, messages: [...c.messages, msg], unread: 0 }
+      : c
+    );
+    persistConvs(updated);
+    setInput("");
+    // Auto-reply
+    const conv = updated.find(c => c.id === activeMsgConvId);
+    if (!conv) return;
+    const role = conv.participantRole;
+    setTimeout(() => {
+      const reply: ChatMessage = { id: `m_${Date.now()}_r`, from: "them", text: generateAutoReply(role), ts: new Date().toISOString() };
+      setConvs(prev => {
+        const u = prev.map(c => c.id === activeMsgConvId
+          ? { ...c, messages: [...c.messages, reply] }
+          : c
+        );
+        try { localStorage.setItem(CONV_KEY, JSON.stringify(u)); } catch {}
+        return u;
+      });
+    }, 1500);
+  }
+
+  function startNewConv(athlete: MockAthlete) {
+    setNewMsgOpen(false);
+    setConvs(prev => {
+      const existing = prev.find(c => c.participantId === athlete.id);
+      if (existing) { setActiveMsgConvId(existing.id); return prev; }
+      const newConv: Conversation = {
+        id: `conv_${Date.now()}`,
+        participantId: athlete.id,
+        participantName: athlete.name,
+        participantRole: "athlete",
+        participantInitial: athlete.photoInitial,
+        unread: 0,
+        messages: [],
+      };
+      const updated = [newConv, ...prev];
+      try { localStorage.setItem(CONV_KEY, JSON.stringify(updated)); } catch {}
+      setActiveMsgConvId(newConv.id);
+      return updated;
+    });
+  }
+
+  function markRead(convId: string) {
+    setConvs(prev => {
+      const u = prev.map(c => c.id === convId ? { ...c, unread: 0 } : c);
+      try { localStorage.setItem(CONV_KEY, JSON.stringify(u)); } catch {}
+      return u;
+    });
+  }
+
+  const filtered = convs.filter(c => c.participantName.toLowerCase().includes(search.toLowerCase()));
+  const activeConv = convs.find(c => c.id === activeMsgConvId) ?? null;
+
+  function fmtTime(ts: string) {
+    const d = new Date(ts);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    if (diffMs < 60000) return "now";
+    if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m`;
+    if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)}h`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  return (
+    <div style={{ display: "flex", height: "calc(100vh - 200px)", minHeight: 500, background: card, border: `1px solid ${border}`, borderRadius: 18, overflow: "hidden" }}>
+      {/* Left panel — conversation list */}
+      <div style={{ width: 320, flexShrink: 0, borderRight: `1px solid ${border}`, display: "flex", flexDirection: "column" }}>
+        {/* Header */}
+        <div style={{ padding: "18px 16px 12px", borderBottom: `1px solid ${border}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1 }}>Messages</p>
+            {isRecruiter && (
+              <button onClick={() => setNewMsgOpen(true)} style={{ padding: "5px 12px", borderRadius: 20, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ New</button>
+            )}
+          </div>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search conversations..."
+            style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.06)", border: `1px solid ${border}`, borderRadius: 10, padding: "8px 12px", fontSize: 13, color: text1, outline: "none", fontFamily: "inherit", boxSizing: "border-box" }}
+          />
+        </div>
+        {/* Conversation list */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: "40px 16px", textAlign: "center" }}>
+              <p style={{ color: text2, fontSize: 13 }}>No conversations yet.</p>
+            </div>
+          )}
+          {filtered.map((conv, i) => {
+            const last = conv.messages[conv.messages.length - 1];
+            const isActive = activeMsgConvId === conv.id;
+            return (
+              <button
+                key={conv.id}
+                onClick={() => { setActiveMsgConvId(conv.id); markRead(conv.id); }}
+                style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "12px 16px", background: isActive ? (isDark ? "rgba(5,150,105,0.12)" : "#F0FDF9") : "none", border: "none", borderTop: i > 0 ? `1px solid ${border}` : "none", cursor: "pointer", textAlign: "left", transition: "background 0.12s" }}
+              >
+                {/* Avatar */}
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ color: "white", fontWeight: 800, fontSize: 15, fontFamily: "var(--font-display)" }}>{conv.participantInitial}</span>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: isActive ? "#10B981" : text1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{conv.participantName}</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                      {last && <span style={{ fontSize: 10, color: text2 }}>{fmtTime(last.ts)}</span>}
+                      {conv.unread > 0 && <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#059669", color: "white", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{conv.unread}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, background: conv.participantRole === "athlete" ? "rgba(5,150,105,0.12)" : "rgba(13,148,136,0.12)", color: conv.participantRole === "athlete" ? "#10B981" : "#0D9488", border: `1px solid ${conv.participantRole === "athlete" ? "rgba(5,150,105,0.25)" : "rgba(13,148,136,0.25)"}`, borderRadius: 100, padding: "1px 6px", textTransform: "capitalize" }}>{conv.participantRole}</span>
+                    {last && <p style={{ fontSize: 11, color: text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{last.from === "me" ? "You: " : ""}{last.text.slice(0, 40)}{last.text.length > 40 ? "…" : ""}</p>}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Right panel — chat view */}
+      {activeConv ? (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          {/* Chat header */}
+          <div style={{ padding: "16px 20px", borderBottom: `1px solid ${border}`, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <span style={{ color: "white", fontWeight: 800, fontSize: 13, fontFamily: "var(--font-display)" }}>{activeConv.participantInitial}</span>
+            </div>
+            <div>
+              <p style={{ fontWeight: 700, fontSize: 15, color: text1 }}>{activeConv.participantName}</p>
+              <span style={{ fontSize: 9, fontWeight: 700, background: activeConv.participantRole === "athlete" ? "rgba(5,150,105,0.12)" : "rgba(13,148,136,0.12)", color: activeConv.participantRole === "athlete" ? "#10B981" : "#0D9488", border: `1px solid ${activeConv.participantRole === "athlete" ? "rgba(5,150,105,0.25)" : "rgba(13,148,136,0.25)"}`, borderRadius: 100, padding: "1px 7px", textTransform: "capitalize" }}>{activeConv.participantRole}</span>
+            </div>
+          </div>
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {activeConv.messages.length === 0 && (
+              <div style={{ margin: "auto", textAlign: "center" }}>
+                <p style={{ color: text2, fontSize: 13 }}>No messages yet. Say hello!</p>
+              </div>
+            )}
+            {activeConv.messages.map(msg => (
+              <div key={msg.id} style={{ display: "flex", justifyContent: msg.from === "me" ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth: "72%", padding: "10px 14px", borderRadius: msg.from === "me" ? "16px 16px 4px 16px" : "16px 16px 16px 4px", background: msg.from === "me" ? "linear-gradient(135deg,#059669,#0D9488)" : (isDark ? "rgba(255,255,255,0.07)" : "#F3F4F6"), border: msg.from === "me" ? "none" : `1px solid ${border}` }}>
+                  <p style={{ fontSize: 13, color: msg.from === "me" ? "white" : text1, lineHeight: 1.5 }}>{msg.text}</p>
+                  <p style={{ fontSize: 9, color: msg.from === "me" ? "rgba(255,255,255,0.55)" : text2, marginTop: 4, textAlign: "right" }}>{fmtTime(msg.ts)}</p>
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+          {/* Input bar */}
+          <div style={{ padding: "12px 16px", borderTop: `1px solid ${border}`, display: "flex", gap: 10 }}>
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+              placeholder="Type a message..."
+              style={{ flex: 1, background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.06)", border: `1px solid ${border}`, borderRadius: 12, padding: "10px 14px", fontSize: 13, color: text1, outline: "none", fontFamily: "inherit" }}
+            />
+            <button onClick={sendMessage} style={{ padding: "10px 18px", borderRadius: 12, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>Send</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ width: 64, height: 64, borderRadius: "50%", background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.5" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <p style={{ fontWeight: 700, fontSize: 16, color: text1, marginBottom: 6 }}>Select a conversation</p>
+            <p style={{ color: text2, fontSize: 13 }}>Choose from the left or start a new message.</p>
+          </div>
+        </div>
+      )}
+
+      {/* New message modal (recruiter only) */}
+      {newMsgOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }} onClick={() => setNewMsgOpen(false)} />
+          <div style={{ position: "relative", width: "100%", maxWidth: 480, maxHeight: "70vh", overflow: "auto", background: isDark ? "#111816" : "white", borderRadius: 20, boxShadow: "0 40px 100px rgba(0,0,0,0.5)", border: `1px solid ${border}` }}>
+            <div style={{ padding: "20px 24px", borderBottom: `1px solid ${border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>Message an Athlete</p>
+              <button onClick={() => setNewMsgOpen(false)} style={{ width: 32, height: 32, borderRadius: "50%", background: isDark ? "rgba(255,255,255,0.07)" : "#F3F4F6", border: "none", cursor: "pointer", color: text2, fontSize: 14 }}>✕</button>
+            </div>
+            <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+              {MOCK_ATHLETES.map(a => (
+                <button key={a.id} onClick={() => startNewConv(a)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 12, background: "none", border: `1px solid ${border}`, cursor: "pointer", textAlign: "left", transition: "background 0.12s" }}>
+                  <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ color: "white", fontWeight: 800, fontSize: 13 }}>{a.photoInitial}</span>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: text1 }}>{a.name}</p>
+                    <p style={{ fontSize: 11, color: text2 }}>{a.position} · {a.club}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -481,28 +1196,63 @@ function EditModal({ onClose }: { onClose: () => void }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   const { profile, sessions, removeSession, profileComplete, setProfile } = useProfile();
-  const [activeTab,  setActiveTab]  = useState<"performance"|"progress"|"explore"|"settings">("performance");
+  const [activeTab,  setActiveTab]  = useState<string>("performance");
   const [editOpen,   setEditOpen]   = useState(false);
   const [pinnedIds,  setPinnedIds]  = useState<string[]>([]);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [showAllInsights, setShowAllInsights] = useState(false);
   const [isDark,     setIsDark]     = useState(true);
+  const [meOpen,     setMeOpen]     = useState(false);
+  const [videoModal, setVideoModal] = useState<AnalysisSession | null>(null);
+  const [topMomentExpanded, setTopMomentExpanded] = useState<number | null>(null);
+  const [watchlist,  setWatchlist]  = useState<string[]>([]);
+  const [activeMsgConvId, setActiveMsgConvId] = useState<string | null>(null);
+  const [msgOpenWithAthlete, setMsgOpenWithAthlete] = useState<string | null>(null);
   const router = useRouter();
 
-  // Force dark on mount, auth guard
+  // Auth guard + default to light mode
   useEffect(() => {
     if (!sessionStorage.getItem(AUTHED_KEY)) { router.replace("/login"); return; }
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved === "light") {
-      document.documentElement.removeAttribute("data-theme");
-      setIsDark(false);
-    } else {
+    if (saved === "dark") {
       document.documentElement.setAttribute("data-theme", "dark");
       setIsDark(true);
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      localStorage.setItem(THEME_KEY, "light");
+      setIsDark(false);
     }
     const pins = localStorage.getItem("kickiq_pinned");
     if (pins) setPinnedIds(JSON.parse(pins));
+    const wl = localStorage.getItem("kickiq_watchlist");
+    if (wl) setWatchlist(JSON.parse(wl));
   }, []);
+
+  // When recruiter mode activates, default to scout-board tab
+  useEffect(() => {
+    if ((profile as any).accountType === "recruiter") {
+      setActiveTab(prev => (["performance","progress","explore"].includes(prev) ? "scout-board" : prev));
+    } else {
+      setActiveTab(prev => (["scout-board","watchlist","messages-rec"].includes(prev) ? "performance" : prev));
+    }
+  }, [(profile as any).accountType]);
+
+  function toggleWatchlist(id: string) {
+    setWatchlist(prev => {
+      const next = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
+      try { localStorage.setItem("kickiq_watchlist", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  function openMessageWith(athleteId: string) {
+    setMsgOpenWithAthlete(null);  // reset first so effect re-fires if same athlete clicked again
+    setTimeout(() => {
+      setMsgOpenWithAthlete(athleteId);
+      setActiveTab("messages-rec");
+    }, 0);
+  }
 
   function toggleTheme() {
     const next = !isDark;
@@ -556,6 +1306,7 @@ export default function ProfilePage() {
   return (
     <main style={{ minHeight: "100vh", background: bg, fontFamily: "var(--font-body)", transition: "background 0.3s" }}>
       {editOpen && <EditModal onClose={() => setEditOpen(false)} />}
+      {videoModal && <SessionVideoModal session={videoModal} onClose={() => setVideoModal(null)} />}
       {compareOpen && compareIds.length === 2 && (
         <CompareModal sessions={sessions} compareIds={compareIds} onClose={() => setCompareOpen(false)} />
       )}
@@ -573,31 +1324,14 @@ export default function ProfilePage() {
 
       {/* ── NAV ── */}
       <nav style={{ position: "sticky", top: 0, zIndex: 40, background: isDark ? "rgba(10,15,13,0.92)" : "rgba(244,251,248,0.92)", backdropFilter: "blur(16px)", borderBottom: `1px solid ${border}` }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 24px", height: 60, display: "flex", alignItems: "center", gap: 0 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 24px", height: 60, display: "flex", alignItems: "center" }}>
           {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 32 }}>
+          <Link href="/profile" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", marginRight: "auto" }}>
             <div style={{ width: 28, height: 28, borderRadius: 7, background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <span style={{ color: "white", fontWeight: 900, fontSize: 13, fontFamily: "var(--font-display)" }}>K</span>
             </div>
             <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, color: text1, letterSpacing: "0.1em" }}>KICKIQ</span>
-          </div>
-
-          {/* Tabs */}
-          <div style={{ display: "flex", flex: 1, gap: 0 }}>
-            {([
-              { id: "performance", label: "Performance" },
-              { id: "progress",    label: "Progress"    },
-              { id: "explore",     label: "Explore"     },
-              { id: "settings",    label: "Profile"     },
-            ] as const).map(t => (
-              <button key={t.id} onClick={() => setActiveTab(t.id)} style={{
-                padding: "0 18px", height: 60, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                background: "none", border: "none", transition: "all 0.15s",
-                color: activeTab === t.id ? "#10B981" : text2,
-                borderBottom: activeTab === t.id ? "2px solid #059669" : "2px solid transparent",
-              }}>{t.label}</button>
-            ))}
-          </div>
+          </Link>
 
           {/* Actions */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -608,6 +1342,54 @@ export default function ProfilePage() {
                 ? <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>Light</>
                 : <><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>Dark</>}
             </button>
+
+            {/* Me dropdown */}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setMeOpen(v => !v)}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px 6px 8px", borderRadius: 20, cursor: "pointer", background: meOpen ? (isDark ? "rgba(5,150,105,0.15)" : "#E6F9F2") : (isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.08)"), border: `1px solid ${meOpen ? "rgba(5,150,105,0.4)" : border}`, color: text1, fontSize: 13, fontWeight: 700, transition: "all 0.15s" }}
+              >
+                {/* Avatar */}
+                <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+                  {profile.photoUrl
+                    ? <img src={profile.photoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    : <span style={{ color: "white", fontWeight: 800, fontSize: 11, fontFamily: "var(--font-display)" }}>{(profile.name || "M")[0].toUpperCase()}</span>
+                  }
+                </div>
+                Me
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ transition: "transform 0.15s", transform: meOpen ? "rotate(180deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+
+              {/* Dropdown panel */}
+              {meOpen && (
+                <div
+                  style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, minWidth: 190, background: isDark ? "#1A2420" : "white", border: `1px solid ${border}`, borderRadius: 14, boxShadow: "0 12px 40px rgba(0,0,0,0.18)", overflow: "hidden", zIndex: 100 }}
+                  onMouseLeave={() => setMeOpen(false)}
+                >
+                  {(isRecruiter ? [
+                    { id: "scout-board",  label: "Scout Board",  icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg> },
+                    { id: "watchlist",    label: "Watchlist",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> },
+                    { id: "messages-rec", label: "Messages",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
+                    { id: "settings-rec", label: "Settings",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> },
+                  ] : [
+                    { id: "performance", label: "Performance", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> },
+                    { id: "progress",    label: "Progress",    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg> },
+                    { id: "explore",     label: "Explore",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> },
+                    { id: "settings",    label: "Profile",     icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+                  ]).map((t, i) => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setActiveTab(t.id); setMeOpen(false); }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "11px 16px", background: activeTab === t.id ? (isDark ? "rgba(5,150,105,0.12)" : "#F0FDF9") : "none", border: "none", borderTop: i > 0 ? `1px solid ${border}` : "none", cursor: "pointer", color: activeTab === t.id ? "#10B981" : text1, fontSize: 13, fontWeight: activeTab === t.id ? 700 : 500, textAlign: "left", transition: "background 0.12s" }}
+                    >
+                      <span style={{ opacity: activeTab === t.id ? 1 : 0.45, color: activeTab === t.id ? "#10B981" : "currentColor" }}>{t.icon}</span>
+                      {t.label}
+                      {activeTab === t.id && <span style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: "#10B981" }} />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </nav>
@@ -633,30 +1415,27 @@ export default function ProfilePage() {
           {/* ── PERFORMANCE TAB ── */}
           {activeTab === "performance" && (
             <>
-              {/* Compact identity strip */}
-              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28, padding: "20px 24px", background: card, border: `1px solid ${border}`, borderRadius: 18 }}>
-                <div style={{ width: 60, height: 60, borderRadius: 16, overflow: "hidden", flexShrink: 0, border: `2px solid ${border}` }}>
+              {/* Slim identity strip */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24, padding: "12px 18px", background: card, border: `1px solid ${border}`, borderRadius: 14 }}>
+                <div style={{ width: 46, height: 46, borderRadius: 12, overflow: "hidden", flexShrink: 0, border: `2px solid ${border}` }}>
                   {profile.photoUrl
                     ? <img src={profile.photoUrl} alt={profile.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     : <div style={{ width: "100%", height: "100%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 26, color: "white" }}>{profile.name.charAt(0).toUpperCase()}</span>
+                        <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 19, color: "white" }}>{profile.name.charAt(0).toUpperCase()}</span>
                       </div>}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1 }}>{profile.name}</p>
-                    {profile.primaryPosition && <span style={{ fontSize: 11, fontWeight: 800, background: "rgba(5,150,105,0.12)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{profile.primaryPosition}</span>}
-                    {profile.openToRecruitment && <span style={{ fontSize: 10, fontWeight: 800, background: "rgba(251,191,36,0.12)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 100, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Open to Recruit</span>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{profile.name}</p>
+                    {profile.primaryPosition && <span style={{ fontSize: 10, fontWeight: 800, background: "rgba(5,150,105,0.12)", color: "#10B981", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>{profile.primaryPosition}</span>}
+                    {profile.openToRecruitment && <span style={{ fontSize: 9, fontWeight: 800, background: "rgba(251,191,36,0.12)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.25)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>Open to Recruit</span>}
                   </div>
-                  <p style={{ fontSize: 12, color: text2, marginTop: 3 }}>
-                    {[profile.currentClub, profile.location, profile.age ? `Age ${profile.age}` : ""].filter(Boolean).join(" · ")}
-                  </p>
+                  <p style={{ fontSize: 11, color: text2, marginTop: 2 }}>{[profile.currentClub, profile.location, profile.age ? `Age ${profile.age}` : ""].filter(Boolean).join(" · ")}</p>
                 </div>
-                {/* Quick stats */}
-                <div style={{ display: "flex", gap: 16, flexShrink: 0 }}>
-                  {bestSpeed && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: "#10B981" }}>{bestSpeed.toFixed(1)}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>m/s best</p></div>}
-                  <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1 }}>{sessions.length}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Sessions</p></div>
-                  {avgSymmetry && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1 }}>{avgSymmetry.toFixed(0)}%</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em" }}>Symmetry</p></div>}
+                <div style={{ display: "flex", gap: 18, flexShrink: 0, borderLeft: `1px solid ${border}`, paddingLeft: 18 }}>
+                  {bestSpeed && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "#10B981", lineHeight: 1 }}>{bestSpeed.toFixed(1)}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>m/s best</p></div>}
+                  <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{sessions.length}</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Sessions</p></div>
+                  {avgSymmetry && <div style={{ textAlign: "center" }}><p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{avgSymmetry.toFixed(0)}%</p><p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Symmetry</p></div>}
                 </div>
               </div>
 
@@ -669,55 +1448,280 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <>
-                  {/* ── Top Moments (best per category, all sessions) ── */}
-                  {topMoments.length > 0 && (
-                    <div style={{ marginBottom: 28 }}>
-                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 14 }}>Top Moments</p>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
-                        {topMoments.slice(0, 3).map((h, i) => (
-                          <div key={i} style={{ background: card, border: `1px solid ${border}`, borderRadius: 14, padding: "16px 14px" }}>
-                            <p style={{ fontSize: 10, fontWeight: 700, color: "#10B981", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{h.label}</p>
-                            {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 24, color: text1 }}>{h.value}</p>}
-                            <p style={{ fontSize: 10, color: text2, marginTop: 4 }}>at {h.timestamp_s.toFixed(1)}s</p>
+                  {/* ── HERO VIDEO ── */}
+                  <div style={{ marginBottom: 24 }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Hero Videos</p>
+                    <div style={{ position: "relative", borderRadius: 20, overflow: "hidden", height: 360, background: "#071A10", cursor: "pointer" }} onClick={() => setVideoModal(sessions[0])}>
+                      <img src={sessions[0].thumbnail || SESSION_THUMBS[0]} alt="" crossOrigin={sessions[0].thumbnail ? undefined : "anonymous"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.6 }} />
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(160deg, rgba(3,12,7,0.7) 0%, rgba(3,12,7,0.25) 50%, rgba(3,12,7,0.88) 100%)" }} />
+                      {/* Session label — top left */}
+                      <div style={{ position: "absolute", top: 16, left: 16, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(12px)", borderRadius: 10, padding: "7px 13px", border: "1px solid rgba(255,255,255,0.09)" }}>
+                        <p style={{ fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Session {new Date(sessions[0].date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</p>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: "white", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sessions[0].videoName}</p>
+                      </div>
+                      {/* HUD chips — top right */}
+                      <div style={{ position: "absolute", top: 16, right: 16, display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                        {sessions[0].peakSpeedMs && (
+                          <div style={{ background: "rgba(5,150,105,0.88)", backdropFilter: "blur(8px)", borderRadius: 8, padding: "6px 11px", display: "flex", alignItems: "center", gap: 5 }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: "white", fontFamily: "var(--font-display)" }}>{sessions[0].peakSpeedMs.toFixed(2)} m/s</span>
                           </div>
+                        )}
+                        {sessions[0].symmetryScore && (
+                          <div style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(8px)", borderRadius: 8, padding: "6px 11px", border: "1px solid rgba(6,182,212,0.4)", display: "flex", alignItems: "center", gap: 5 }}>
+                            <span style={{ fontSize: 11 }}>⚖️</span>
+                            <span style={{ fontSize: 12, fontWeight: 800, color: "#06B6D4" }}>{sessions[0].symmetryScore.toFixed(0)}% sym</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Play button */}
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ width: 72, height: 72, borderRadius: "50%", background: "rgba(5,150,105,0.88)", border: "3px solid rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 40px rgba(5,150,105,0.5), 0 0 80px rgba(5,150,105,0.2)" }}>
+                          <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </div>
+                      </div>
+                      {/* Bottom HUD bar */}
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "linear-gradient(to top, rgba(0,0,0,0.95) 0%, transparent 100%)", padding: "50px 20px 18px" }}>
+                        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
+                          <div style={{ display: "flex", gap: 24 }}>
+                            {sessions[0].highlights?.slice(0, 2).map((h, i) => (
+                              <div key={i}>
+                                <p style={{ fontSize: 9, fontWeight: 800, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{h.label}</p>
+                                <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "white", lineHeight: 1 }}>{h.value}</p>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            {sessions[0].overallRisk && <span style={{ fontSize: 11, fontWeight: 800, color: riskColor(sessions[0].overallRisk), background: `${riskColor(sessions[0].overallRisk)}22`, border: `1px solid ${riskColor(sessions[0].overallRisk)}44`, borderRadius: 100, padding: "3px 10px" }}>{riskLabel(sessions[0].overallRisk)} Risk</span>}
+                            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", fontWeight: 600 }}>{sessions[0].videoDuration.toFixed(0)}s</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Below-hero metric strip */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                      {[
+                        { icon: "sprint", label: "Max Sprint Speed", value: sessions[0].peakSpeedMs ? `${sessions[0].peakSpeedMs.toFixed(2)} m/s` : "—" },
+                        (() => {
+                          const turnHighlight = sessions[0].highlights?.find(h => h.label.toLowerCase().includes("turn"));
+                          const rawVal = turnHighlight?.value ?? null;
+                          const numVal = rawVal ? parseFloat(rawVal) : null;
+                          const isHighOutlier = numVal !== null && numVal > 12;
+                          return { icon: "agility", label: "Quickest Turn", value: rawVal ?? "—", subLabel: "lat. acceleration", outlier: isHighOutlier };
+                        })(),
+                      ].map(m => (
+                        <div key={m.label} style={{ background: card, border: `1px solid ${border}`, borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(5,150,105,0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            {m.icon === "sprint" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="5" r="1"/><path d="m9 20 3-8 3 3 2-5"/><path d="M6 20h4"/><path d="M15 20h3"/></svg>}
+                            {m.icon === "agility" && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14"/><path d="m15 8 4 4-4 4"/></svg>}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <p style={{ fontSize: 10, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{m.label}:</p>
+                            <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1, whiteSpace: "nowrap" }}>{m.value}{(m as any).outlier && <span style={{ fontSize: 9, fontWeight: 600, color: "#F59E0B", marginLeft: 4 }}>est.</span>}</p>
+                            {(m as any).subLabel && <p style={{ fontSize: 9, color: text2, marginTop: 1 }}>{(m as any).subLabel}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── TOP MOMENTS ── */}
+                  {topMoments.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Top Moments</p>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+                        {topMoments.slice(0, 3).map((h, i) => {
+                          const meta = [
+                            { icon: "bolt",    color: "#10B981",
+                              explain: "Your fastest recorded sprint in this clip. This reflects explosive anaerobic power and fast-twitch muscle activation. Elite female amateur players average ~8–9 m/s; top professionals reach 11+ m/s.",
+                              barLabel: (v: number) => v < 5 ? "Developing" : v < 7 ? "Average" : v < 8.5 ? "Strong" : "Elite",
+                              barColor: (v: number) => v < 5 ? "#6B7280" : v < 7 ? "#F59E0B" : v < 8.5 ? "#10B981" : "#34D399",
+                              barRatio: (v: number) => Math.min(1, v / 10),
+                              barMin: "0 m/s", barMax: "10+ m/s",
+                            },
+                            { icon: "sprint",  color: "#A78BFA",
+                              explain: "Peak torque-to-speed ratio during the push-off phase of your stride. Accounts for your age, height and weight. Higher values mean your legs generate more force per stride — key for acceleration and jumping.",
+                              barLabel: (v: number) => v < 0.3 ? "Light" : v < 0.55 ? "Moderate" : v < 0.8 ? "Strong" : "Max Power",
+                              barColor: (v: number) => v < 0.3 ? "#10B981" : v < 0.55 ? "#F59E0B" : v < 0.8 ? "#F97316" : "#EF4444",
+                              barRatio: (v: number) => v,
+                              barMin: "Light", barMax: "Max",
+                              isPower: true,
+                            },
+                            { icon: "agility", color: "#06B6D4",
+                              explain: "Peak lateral acceleration recorded during a direction change. This measures how quickly you can redirect momentum — a key skill for beating defenders and tracking attackers. 10–15 m/s² is good; 18+ is elite.",
+                              barLabel: (v: number) => v < 6 ? "Low" : v < 10 ? "Moderate" : v < 15 ? "Sharp" : "Elite",
+                              barColor: (v: number) => v < 6 ? "#6B7280" : v < 10 ? "#F59E0B" : v < 15 ? "#10B981" : "#06B6D4",
+                              barRatio: (v: number) => Math.min(1, v / 20),
+                              barMin: "0 m/s²", barMax: "20+ m/s²",
+                            },
+                          ][i] ?? { icon: "bolt", color: "#10B981", explain: "", barLabel: () => "", barColor: () => "#10B981", barRatio: () => 0, barMin: "", barMax: "" };
+                          const isOpen = topMomentExpanded === i;
+                          const rawNum = parseFloat(h.value ?? "") || 0;
+
+                          // For power bar, compute normalized ratio
+                          let barRatioVal = 0;
+                          if ((meta as any).isPower) {
+                            const age2 = parseInt(profile.age || "20");
+                            const ht2  = parseFloat((profile as any).heightCm || "170");
+                            const wt2  = parseFloat((profile as any).weightKg || "70");
+                            const af   = age2 < 10 ? 0.50 : age2 < 14 ? 0.65 : age2 < 18 ? 0.80 : age2 < 35 ? 1.0 : 0.90;
+                            barRatioVal = Math.min(1, Math.max(0, rawNum / (130 * af * (ht2 / 170) * (wt2 / 70))));
+                          } else {
+                            barRatioVal = meta.barRatio(rawNum);
+                          }
+                          const bLabel = meta.barLabel((meta as any).isPower ? barRatioVal : rawNum);
+                          const bColor = meta.barColor((meta as any).isPower ? barRatioVal : rawNum);
+
+                          return (
+                            <div
+                              key={i}
+                              onClick={() => setTopMomentExpanded(isOpen ? null : i)}
+                              style={{ background: isDark ? "#141A17" : "white", border: `1px solid ${isOpen ? meta.color + "55" : border}`, borderRadius: 16, padding: "20px 18px", position: "relative", overflow: "hidden", cursor: "pointer", transition: "all 0.2s", boxShadow: isOpen ? `0 0 0 2px ${meta.color}22` : "none" }}
+                            >
+                              <div style={{ position: "absolute", top: -28, right: -28, width: 100, height: 100, borderRadius: "50%", background: `radial-gradient(circle, ${meta.color}18 0%, transparent 70%)`, pointerEvents: "none" }} />
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ width: 36, height: 36, borderRadius: 10, background: `${meta.color}18`, border: `1px solid ${meta.color}28`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    {meta.icon === "bolt"    && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>}
+                                    {meta.icon === "sprint"  && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M13 4a1 1 0 1 0 2 0 1 1 0 0 0-2 0"/><path d="m7.5 14 2.5-6 3 3 2-3.5"/><path d="M5 20h14"/></svg>}
+                                    {meta.icon === "agility" && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={meta.color} strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>}
+                                  </div>
+                                  <p style={{ fontSize: 10, fontWeight: 700, color: meta.color, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h.label}</p>
+                                </div>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={text2} strokeWidth="2" strokeLinecap="round" style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }}><polyline points="6 9 12 15 18 9"/></svg>
+                              </div>
+
+                              {h.value && <p style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 32, color: text1, lineHeight: 1, marginBottom: 10 }}>{h.value}</p>}
+
+                              {/* Strength bar — always visible */}
+                              <div style={{ marginBottom: 8 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.barMin}</span>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: bColor, textTransform: "uppercase", letterSpacing: "0.05em" }}>{bLabel}</span>
+                                  <span style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.barMax}</span>
+                                </div>
+                                <div style={{ height: 7, borderRadius: 4, background: isDark ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)", overflow: "hidden", position: "relative" }}>
+                                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, #10B981 0%, #F59E0B 45%, #F97316 70%, #EF4444 100%)", opacity: 0.18, borderRadius: 4 }} />
+                                  <div style={{ height: "100%", width: `${barRatioVal * 100}%`, borderRadius: 4, background: `linear-gradient(90deg, #10B981 0%, ${bColor} 100%)`, transition: "width 0.6s ease" }} />
+                                </div>
+                              </div>
+
+                              <p style={{ fontSize: 10, color: text2 }}>at {h.timestamp_s.toFixed(1)}s · {h.sessionName}</p>
+
+                              {/* Flashcard expansion */}
+                              {isOpen && (
+                                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${border}` }}>
+                                  <p style={{ fontSize: 12, color: isDark ? "rgba(255,255,255,0.65)" : "#374151", lineHeight: 1.6 }}>{meta.explain}</p>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── AI INSIGHTS (top 3 + "View full breakdown" toggle) ── */}
+                  {(() => {
+                    const allInsights: string[] = Array.from(new Set(sessions.flatMap(s => (s as any).trainingSuggestions as string[] || [])));
+                    const top = allInsights.slice(0, 3);
+                    const extra = allInsights.slice(3);
+                    if (!top.length) return null;
+                    return (
+                      <div style={{ marginBottom: 24 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                          <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>AI Insights</p>
+                          {extra.length > 0 && (
+                            <button onClick={() => setShowAllInsights(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#10B981", padding: 0 }}>
+                              {showAllInsights ? "Show less ▲" : `View full breakdown (${extra.length} more) ▼`}
+                            </button>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {(showAllInsights ? allInsights : top).map((insight, i) => (
+                            <div key={i} style={{ display: "flex", gap: 12, background: isDark ? "rgba(5,150,105,0.06)" : "#F0FDF9", border: `1px solid ${isDark ? "rgba(5,150,105,0.12)" : "rgba(5,150,105,0.18)"}`, borderRadius: 12, padding: "12px 14px" }}>
+                              <div style={{ width: 22, height: 22, borderRadius: "50%", background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.28)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                                <span style={{ fontSize: 10, fontWeight: 800, color: "#10B981" }}>{i + 1}</span>
+                              </div>
+                              <p style={{ fontSize: 13, color: isDark ? "rgba(255,255,255,0.65)" : "#374151", lineHeight: 1.55 }}>{insight}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── MOVEMENT SIGNATURES ── */}
+                  {allMoves.length > 0 && (
+                    <div style={{ marginBottom: 24 }}>
+                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 10 }}>Movement Signatures</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {allMoves.map(m => (
+                          <span key={m} style={{ fontSize: 12, fontWeight: 700, background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", color: "#10B981", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 100, padding: "6px 14px", display: "flex", alignItems: "center", gap: 5 }}>
+                            <svg width="10" height="10" viewBox="0 0 12 12" fill="#10B981"><path d="M2 6l3 3 5-5" stroke="#10B981" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
+                            {m}
+                          </span>
                         ))}
                       </div>
                     </div>
                   )}
 
-                  {/* ── Moves detected (short pills) ── */}
-                  {allMoves.length > 0 && (
-                    <div style={{ marginBottom: 28 }}>
-                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Movement Patterns</p>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {allMoves.map(m => <span key={m} style={{ fontSize: 12, fontWeight: 700, background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", color: "#10B981", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 100, padding: "6px 14px" }}>{m}</span>)}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── Pinned sessions ── */}
-                  {pinnedSessions.length > 0 && (
-                    <div style={{ marginBottom: 28 }}>
-                      <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1, marginBottom: 12 }}>Pinned Sessions <span style={{ fontSize: 12, color: text2, fontWeight: 600 }}>({pinnedSessions.length}/3)</span></p>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {pinnedSessions.map(s => <SessionCard key={s.id} session={s} onRemove={() => removeSession(s.id)} pinned={true} onPin={() => togglePin(s.id)} />)}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* ── All sessions ── */}
+                  {/* ── ALL SESSIONS — YouTube-style thumbnail grid ── */}
                   <div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
                       <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, color: text1 }}>All Sessions <span style={{ fontSize: 13, color: text2, fontWeight: 600 }}>({sessions.length})</span></p>
                       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                         {compareIds.length === 0 && sessions.length >= 2 && (
                           <span style={{ fontSize: 11, color: text2, fontWeight: 600 }}>Select 2 to compare</span>
                         )}
-                        <Link href="/analyze" style={{ fontSize: 13, fontWeight: 700, color: "#10B981", textDecoration: "none" }}>+ Add →</Link>
+                        <Link href="/analyze" style={{ fontSize: 13, fontWeight: 700, color: "#10B981", textDecoration: "none" }}>+ Add Video →</Link>
                       </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {sessions.map(s => <SessionCard key={s.id} session={s} onRemove={() => removeSession(s.id)} pinned={pinnedIds.includes(s.id)} onPin={() => togglePin(s.id)} selected={compareIds.includes(s.id)} onSelect={() => toggleCompare(s.id)} />)}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
+                      {sessions.map((s, idx) => {
+                        const thumb = s.thumbnail || SESSION_THUMBS[idx % SESSION_THUMBS.length];
+                        const rc = { color: riskColor(s.overallRisk), label: riskLabel(s.overallRisk) };
+                        const isSelected = compareIds.includes(s.id);
+                        return (
+                          <div key={s.id} style={{ borderRadius: 16, overflow: "hidden", border: `1px solid ${isSelected ? "rgba(5,150,105,0.5)" : border}`, background: isDark ? "#141A17" : "white", boxShadow: isSelected ? "0 0 0 2px rgba(5,150,105,0.25)" : "none", transition: "box-shadow 0.15s" }}>
+                            {/* Thumbnail */}
+                            <div style={{ position: "relative", height: 148, cursor: "pointer" }} onClick={() => setVideoModal(s)}>
+                              <img src={thumb} alt="" crossOrigin={s.thumbnail ? undefined : "anonymous"} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.62) 100%)" }} />
+                              {/* Compare checkbox — stop propagation so clicking it doesn't open modal */}
+                              <div
+                                style={{ position: "absolute", top: 8, left: 8, width: 20, height: 20, borderRadius: 6, border: `2px solid ${isSelected ? "#059669" : "rgba(255,255,255,0.4)"}`, background: isSelected ? "#059669" : "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }}
+                                onClick={e => { e.stopPropagation(); toggleCompare(s.id); }}
+                              >
+                                {isSelected && <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2.5 2.5L8 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                              </div>
+                              {/* Play button */}
+                              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+                                <div style={{ width: 42, height: 42, borderRadius: "50%", background: "rgba(0,0,0,0.48)", border: "2px solid rgba(255,255,255,0.38)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                </div>
+                              </div>
+                              {/* Speed badge */}
+                              {s.peakSpeedMs && <div style={{ position: "absolute", top: 8, right: 8, background: "rgba(5,150,105,0.9)", borderRadius: 6, padding: "3px 8px" }}><span style={{ fontSize: 11, fontWeight: 800, color: "white" }}>{s.peakSpeedMs.toFixed(1)} m/s</span></div>}
+                              {/* Risk badge */}
+                              {s.overallRisk && <div style={{ position: "absolute", bottom: 8, left: 8, background: `${rc.color}28`, border: `1px solid ${rc.color}55`, borderRadius: 6, padding: "2px 7px", backdropFilter: "blur(4px)" }}><span style={{ fontSize: 9, fontWeight: 800, color: rc.color }}>{rc.label}</span></div>}
+                              {/* Duration */}
+                              <span style={{ position: "absolute", bottom: 8, right: 8, fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.7)", background: "rgba(0,0,0,0.45)", borderRadius: 4, padding: "2px 6px" }}>{s.videoDuration.toFixed(0)}s</span>
+                            </div>
+                            {/* Info row */}
+                            <div style={{ padding: "10px 12px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <p style={{ fontSize: 12, fontWeight: 700, color: text1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 2 }}>{s.videoName}</p>
+                                <p style={{ fontSize: 10, color: text2 }}>{new Date(s.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}{s.peakTorqueNm ? ` · ${s.peakTorqueNm.toFixed(0)} Nm` : ""}</p>
+                              </div>
+                              <div style={{ display: "flex", gap: 4, marginLeft: 8, flexShrink: 0 }}>
+                                <button onClick={() => togglePin(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: pinnedIds.includes(s.id) ? "rgba(251,191,36,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${pinnedIds.includes(s.id) ? "rgba(251,191,36,0.4)" : "rgba(255,255,255,0.1)"}`, cursor: "pointer", color: pinnedIds.includes(s.id) ? "#FBBF24" : "rgba(255,255,255,0.25)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>
+                                <button onClick={() => removeSession(s.id)} style={{ width: 26, height: 26, borderRadius: "50%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", color: "rgba(255,255,255,0.2)", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </>
@@ -740,7 +1744,7 @@ export default function ProfilePage() {
                   <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", display: "block" }}>
                     <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, overflow: "hidden", transition: "all 0.15s", cursor: "pointer" }}>
                       <div style={{ height: 160, overflow: "hidden" }}>
-                        <img src={item.img} alt={item.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        <img src={item.img} alt={item.title} crossOrigin="anonymous" style={{ width: "100%", height: "100%", objectFit: "cover", background: "#1a2e28" }} onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
                       </div>
                       <div style={{ padding: "14px 16px" }}>
                         <span style={{ fontSize: 10, fontWeight: 800, color: "#10B981", textTransform: "uppercase", letterSpacing: "0.08em" }}>{item.cat}</span>
@@ -819,6 +1823,246 @@ export default function ProfilePage() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── RECRUITER: SCOUT BOARD TAB ── */}
+          {activeTab === "scout-board" && isRecruiter && (
+            <div>
+              {/* Recruiter header strip */}
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24, padding: "16px 20px", background: card, border: `1px solid ${border}`, borderRadius: 14 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 22, color: "white" }}>{(profile.name || "R")[0].toUpperCase()}</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, color: text1 }}>{profile.name || "Recruiter"}</p>
+                    <span style={{ fontSize: 10, fontWeight: 800, background: "rgba(13,148,136,0.12)", color: "#0D9488", border: "1px solid rgba(13,148,136,0.25)", borderRadius: 100, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                      {(profile as any).recruiterRole || "Scout"}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 11, color: text2, marginTop: 2 }}>{(profile as any).organization || profile.currentClub || "Independent Scout"}</p>
+                </div>
+                <div style={{ display: "flex", gap: 20, flexShrink: 0, borderLeft: `1px solid ${border}`, paddingLeft: 20 }}>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: "#10B981", lineHeight: 1 }}>{watchlist.length}</p>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Watching</p>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{MOCK_ATHLETES.length}</p>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Athletes</p>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20, color: text1, lineHeight: 1 }}>{sessions.length}</p>
+                    <p style={{ fontSize: 9, fontWeight: 700, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Reviewed</p>
+                  </div>
+                </div>
+              </div>
+
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 6 }}>Scout Board</p>
+              <p style={{ color: text2, fontSize: 13, marginBottom: 20 }}>Browse athlete profiles. Watch or message any prospect.</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+                {MOCK_ATHLETES.map(athlete => {
+                  const inWatch = watchlist.includes(athlete.id);
+                  return (
+                    <div key={athlete.id} style={{ background: card, border: `1px solid ${inWatch ? "rgba(5,150,105,0.4)" : border}`, borderRadius: 16, padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12, boxShadow: inWatch ? "0 0 0 2px rgba(5,150,105,0.15)" : "none", transition: "all 0.15s" }}>
+                      {/* Avatar + position badge */}
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        <div style={{ position: "relative", flexShrink: 0 }}>
+                          <div style={{ width: 52, height: 52, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <span style={{ color: "white", fontWeight: 900, fontSize: 20, fontFamily: "var(--font-display)" }}>{athlete.photoInitial}</span>
+                          </div>
+                          {inWatch && <div style={{ position: "absolute", bottom: -2, right: -2, width: 16, height: 16, borderRadius: "50%", background: "#059669", border: "2px solid " + bg, display: "flex", alignItems: "center", justifyContent: "center" }}><svg width="8" height="8" viewBox="0 0 24 24" fill="white"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontWeight: 800, fontSize: 15, color: text1, marginBottom: 2 }}>{athlete.name}</p>
+                          <p style={{ fontSize: 11, color: text2 }}>{athlete.age} · {athlete.club}</p>
+                          <p style={{ fontSize: 11, color: text2 }}>{athlete.location}</p>
+                        </div>
+                        <span style={{ fontSize: 9, fontWeight: 800, background: "rgba(5,150,105,0.1)", color: "#10B981", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 100, padding: "2px 7px", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>{athlete.position}</span>
+                      </div>
+                      {/* Stats */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                        <div style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(5,150,105,0.04)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <p style={{ fontSize: 9, color: text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Speed</p>
+                          <p style={{ fontSize: 14, fontWeight: 800, color: "#10B981" }}>{athlete.peakSpeedMs}</p>
+                          <p style={{ fontSize: 8, color: text2 }}>m/s</p>
+                        </div>
+                        <div style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(5,150,105,0.04)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <p style={{ fontSize: 9, color: text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Symmetry</p>
+                          <p style={{ fontSize: 14, fontWeight: 800, color: "#06B6D4" }}>{athlete.symmetryScore}%</p>
+                          <p style={{ fontSize: 8, color: text2 }}>balance</p>
+                        </div>
+                        <div style={{ background: isDark ? "rgba(255,255,255,0.04)" : "rgba(5,150,105,0.04)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+                          <p style={{ fontSize: 9, color: text2, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Risk</p>
+                          <span style={{ fontSize: 10, fontWeight: 800, color: riskColor(athlete.overallRisk) }}>{athlete.overallRisk === "low" ? "Low" : athlete.overallRisk === "moderate" ? "Mod" : "High"}</span>
+                        </div>
+                      </div>
+                      {/* Action buttons */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <button
+                          onClick={() => toggleWatchlist(athlete.id)}
+                          style={{ padding: "9px 0", borderRadius: 10, border: `1px solid ${inWatch ? "rgba(5,150,105,0.4)" : border}`, background: inWatch ? "rgba(5,150,105,0.12)" : "transparent", color: inWatch ? "#10B981" : text2, fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill={inWatch ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                          {inWatch ? "Watching" : "Watch"}
+                        </button>
+                        <button
+                          onClick={() => openMessageWith(athlete.id)}
+                          style={{ padding: "9px 0", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                          Message
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── RECRUITER: WATCHLIST TAB ── */}
+          {activeTab === "watchlist" && isRecruiter && (
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 6 }}>Watchlist</p>
+              <p style={{ color: text2, fontSize: 13, marginBottom: 20 }}>Athletes you are actively monitoring.</p>
+              {watchlist.length === 0 ? (
+                <div style={{ padding: "80px 24px", textAlign: "center", background: card, border: `1px solid ${border}`, borderRadius: 18 }}>
+                  <div style={{ width: 64, height: 64, borderRadius: "50%", background: isDark ? "rgba(5,150,105,0.1)" : "#ECFDF5", border: `2px dashed ${isDark ? "rgba(5,150,105,0.3)" : "#A7F3D0"}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </div>
+                  <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 8 }}>Your watchlist is empty</p>
+                  <p style={{ color: text2, fontSize: 14, marginBottom: 20 }}>Go to Scout Board and hit "Watch" on promising athletes.</p>
+                  <button onClick={() => setActiveTab("scout-board")} style={{ padding: "12px 28px", borderRadius: 12, background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 14, border: "none", cursor: "pointer" }}>Open Scout Board →</button>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+                  {MOCK_ATHLETES.filter(a => watchlist.includes(a.id)).map(athlete => (
+                    <div key={athlete.id} style={{ background: card, border: `1px solid rgba(5,150,105,0.3)`, borderRadius: 16, padding: "18px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ width: 46, height: 46, borderRadius: "50%", background: "linear-gradient(135deg,#059669,#0D9488)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <span style={{ color: "white", fontWeight: 900, fontSize: 18, fontFamily: "var(--font-display)" }}>{athlete.photoInitial}</span>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <p style={{ fontWeight: 800, fontSize: 14, color: text1 }}>{athlete.name}</p>
+                          <p style={{ fontSize: 11, color: text2 }}>{athlete.position} · {athlete.club}</p>
+                        </div>
+                        <button onClick={() => toggleWatchlist(athlete.id)} style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(5,150,105,0.12)", border: "1px solid rgba(5,150,105,0.3)", cursor: "pointer", color: "#10B981", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        </button>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>{athlete.peakSpeedMs} m/s</span>
+                        <span style={{ fontSize: 11, color: text2 }}>·</span>
+                        <span style={{ fontSize: 11, color: text2 }}>{athlete.symmetryScore}% sym</span>
+                        <span style={{ fontSize: 11, color: text2 }}>·</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: riskColor(athlete.overallRisk) }}>{athlete.overallRisk} risk</span>
+                      </div>
+                      <button onClick={() => openMessageWith(athlete.id)} style={{ padding: "8px 0", borderRadius: 10, border: "none", background: "linear-gradient(135deg,#059669,#0D9488)", color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>Message →</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── RECRUITER: MESSAGES TAB ── */}
+          {activeTab === "messages-rec" && isRecruiter && (
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 20 }}>Messages</p>
+              <MessagingPanel
+                isDark={isDark} bg={bg} card={card} border={border} text1={text1} text2={text2}
+                activeMsgConvId={activeMsgConvId}
+                setActiveMsgConvId={setActiveMsgConvId}
+                openWithAthleteId={msgOpenWithAthlete}
+                isRecruiter={true}
+              />
+            </div>
+          )}
+
+          {/* ── RECRUITER: SETTINGS TAB ── */}
+          {activeTab === "settings-rec" && isRecruiter && (
+            <div style={{ maxWidth: 560, margin: "0 auto" }}>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 28, color: text1, marginBottom: 24 }}>Recruiter Settings</p>
+
+              {/* Identity */}
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: "20px 24px", marginBottom: 14 }}>
+                <p style={{ fontWeight: 700, fontSize: 15, color: text1, marginBottom: 16 }}>Identity</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {[
+                    { label: "Full Name", key: "name", placeholder: "Your name" },
+                    { label: "Email", key: "email", placeholder: "your@email.com" },
+                    { label: "Organization / Club", key: "organization", placeholder: "FC United Scouting" },
+                  ].map(f => (
+                    <div key={f.key}>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: text2, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</label>
+                      <input
+                        value={f.key === "name" || f.key === "email" ? (profile[f.key as keyof typeof profile] as string) || "" : (profile as any)[f.key] || ""}
+                        onChange={e => setProfile({ [f.key]: e.target.value } as any)}
+                        placeholder={f.placeholder}
+                        style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.04)", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, color: text1, outline: "none", fontFamily: "inherit", boxSizing: "border-box" }}
+                      />
+                    </div>
+                  ))}
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: text2, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>Role</label>
+                    <select
+                      value={(profile as any).recruiterRole || "Scout"}
+                      onChange={e => setProfile({ recruiterRole: e.target.value } as any)}
+                      style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.04)", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, color: text1, outline: "none", fontFamily: "inherit", cursor: "pointer", boxSizing: "border-box" }}
+                    >
+                      {["Scout","Head Coach","Analyst","Director of Recruitment"].map(r => <option key={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: text2, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>Bio / Scouting Focus</label>
+                    <textarea
+                      value={profile.bio || ""}
+                      onChange={e => setProfile({ bio: e.target.value })}
+                      rows={3}
+                      placeholder="Describe your scouting focus and methodology..."
+                      style={{ width: "100%", background: isDark ? "rgba(255,255,255,0.06)" : "rgba(5,150,105,0.04)", border: `1px solid ${border}`, borderRadius: 10, padding: "10px 14px", fontSize: 14, color: text1, outline: "none", fontFamily: "inherit", resize: "none", boxSizing: "border-box" }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Account type switcher */}
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: "18px 24px", marginBottom: 14 }}>
+                <p style={{ fontWeight: 700, fontSize: 15, color: text1, marginBottom: 4 }}>Account Type</p>
+                <p style={{ fontSize: 12, color: text2, marginBottom: 14 }}>Switch back to Athlete mode to upload and track sessions.</p>
+                <button onClick={() => setProfile({ accountType: "athlete" } as any)} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  Switch to Athlete Mode
+                </button>
+              </div>
+
+              {/* Danger zone */}
+              <div style={{ background: card, border: `1px solid ${border}`, borderRadius: 16, padding: "18px 24px" }}>
+                <p style={{ fontWeight: 700, fontSize: 13, color: text2, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 14 }}>Account</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <button onClick={() => { sessionStorage.removeItem(AUTHED_KEY); window.location.href = "/login"; }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: `1px solid ${border}`, color: text2, fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+                    Log out
+                  </button>
+                  <button onClick={() => { if (confirm("Delete your account? This cannot be undone.")) { localStorage.removeItem("kaori_profile"); localStorage.removeItem("kaori_sessions"); window.location.href = "/"; } }} style={{ width: "100%", padding: "12px", borderRadius: 12, background: "transparent", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171", fontWeight: 600, fontSize: 14, cursor: "pointer", textAlign: "left" }}>
+                    Delete Account
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── ATHLETE: MESSAGES TAB (for athlete accounts) ── */}
+          {activeTab === "messages" && !isRecruiter && (
+            <div>
+              <p style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: text1, marginBottom: 20 }}>Messages</p>
+              <MessagingPanel
+                isDark={isDark} bg={bg} card={card} border={border} text1={text1} text2={text2}
+                activeMsgConvId={activeMsgConvId}
+                setActiveMsgConvId={setActiveMsgConvId}
+                openWithAthleteId={null}
+                isRecruiter={false}
+              />
             </div>
           )}
         </div>
